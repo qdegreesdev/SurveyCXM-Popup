@@ -91,7 +91,11 @@ class DatabaseService:
         except RuntimeError:
             return []
         except Exception as e:
-            logger.error(f"Query error: {e} | preview: {query[:120]}")
+            if "Unknown column" in str(e):
+                # Suppress spam for expected missing columns in dynamic survey tables
+                pass
+            else:
+                logger.error(f"Query error: {e} | preview: {query[:120]}")
             return []
 
     @staticmethod
@@ -170,17 +174,13 @@ class DatabaseService:
         end_dt: datetime,
     ) -> list[dict]:
         responses_table = f"survey_responses_{survey_id}"
-        nr_table = f"survey_responses_nr_{survey_id}"
         safe_col = self._safe_slug(slug)
 
         query = f"""
             SELECT
                 sr.{safe_col}  AS score,
-                sr.created_at,
-                nr.f1, nr.f2, nr.f3,
-                nr.key_1, nr.key_2
+                sr.created_at
             FROM {responses_table} sr
-            LEFT JOIN {nr_table} nr ON sr.survey_response = nr.id
             WHERE sr.survey_id = %s
               AND sr.{safe_col} IS NOT NULL
               AND sr.created_at >= %s
