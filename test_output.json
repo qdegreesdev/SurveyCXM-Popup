@@ -1,0 +1,25 @@
+{
+    "greeting": "Good Afternoon, Karan Kumar",
+    "ai_summary": "<p>I have analyzed the changes since your last visit.</p><p>The good news is that overall NPS has improved by <strong>26.67 points</strong>, bringing the current score to <strong>-13.33</strong>.</p><p><strong>South</strong> is leading the turnaround, posting a strong <strong>100 points improvement</strong> and setting the benchmark for customer experience performance.</p><p>However, <strong>West</strong> requires attention, with NPS declining by <strong>100 points</strong>, making it the largest contributor to recent negative movement.</p><p>The top themes driving dissatisfaction remain <strong>Foreclosure Issues</strong>.</p><p>If addressed promptly, the current recovery momentum can be accelerated while reducing attrition risk in vulnerable segments.</p>",
+    "ai_summary_audio_url": "http://testserver/api/audio/tts_ab121b644ed7421f8b0c2ffe70b1a754.mp3",
+    "top_alert_VOC": [
+        {
+            "verbatim": "This is the worst service I've ever received. If this issue isn't resolved immediately, I'll close my account and switch to another provider.",
+            "extra_info": "Zone:North, State:Uttar Pradesh, City:Gautam Buddha Nagar, ZSM:Hukam Singh"
+        },
+        {
+            "verbatim": "This is the worst service I've ever received. If this issue isn't resolved immediately, I'll close my account and switch to another provider",
+            "extra_info": "Zone:North, State:Uttar Pradesh, City:Lucknow, ZSM:Hukam Singh"
+        },
+        {
+            "verbatim": "This is the worst service l've ever received. If this issue isn't resolved immediately, I'll close my account and switch to another provider.",
+            "extra_info": "Zone:North, State:Uttar Pradesh, City:Ghaziabad, ZSM:Hukam Singh"
+        },
+        {
+            "verbatim": "I received q foreclosure notice by mistake and can not reach any agent on the phone to stop the process",
+            "extra_info": "Zone:North, State:Rajasthan, City:Jaipur, ZSM:Hukam Singh"
+        }
+    ],
+    "voc_audio_url": "http://testserver/api/audio/tts_2d9b381098034e01be41ac81538cc452.mp3",
+    "is_data_found": 1
+}

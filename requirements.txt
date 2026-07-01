@@ -1,0 +1,13 @@
+fastapi>=0.100.0
+uvicorn>=0.22.0
+sqlalchemy>=2.0.0
+pymysql>=1.0.0
+python-dotenv>=1.0.0
+openai>=1.0.0
+pandas>=2.0.0
+loguru>=0.7.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+cryptography>=41.0.0
+python-multipart>=0.0.9
+edge-tts>=0.8.0
