@@ -117,8 +117,17 @@ async def login_popup_summary(
         # Build human-readable dates for AI
         last_login_label = last_login_dt.strftime("%b %d, %Y")
         
-        # Use explicit base_url from .env if defined, else resolve dynamically based on request
-        base_url = settings.base_url.rstrip("/") if settings.base_url else str(request.base_url).rstrip("/")
+        # Try explicit base_url from .env
+        if settings.base_url:
+            base_url = settings.base_url.rstrip("/")
+        else:
+            # Fallback: construct dynamically from headers (works behind proxy without middleware)
+            host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+            scheme = request.headers.get("x-forwarded-proto", "http")
+            if host:
+                base_url = f"{scheme}://{host}"
+            else:
+                base_url = str(request.base_url).rstrip("/")
         db = get_db_service()
         if not db or not db._ensure_connection() or not database.DB_AVAILABLE or settings.use_mock_data:
             summary_text = "Database is unavailable. Cannot fetch real time data for your briefing."
