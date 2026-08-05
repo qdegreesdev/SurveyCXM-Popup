@@ -238,8 +238,10 @@ async def login_popup_summary(
         }
 
     except Exception as e:
-        logger.error(f"Login Popup Summary endpoint error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error.")
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Login Popup Summary endpoint error: {e}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 
