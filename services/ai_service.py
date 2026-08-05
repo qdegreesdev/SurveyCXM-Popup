@@ -231,9 +231,14 @@ def answer_user_question(nps_data: dict, demographics: list, critical_issues: li
             for d in demographics
         ])
 
-        # Issues with verbatim samples and churn counts
+        # Issues with verbatim samples and churn counts, including location data
+        def format_sample(s):
+            locs = [f"{k}:{v}" for k, v in s.get("loc_data", {}).items() if v and v != "Unknown"]
+            loc_str = f" (Loc: {', '.join(locs)})" if locs else ""
+            return f"{s.get('verbatim', '')}{loc_str}"
+
         issues_str = chr(10).join([
-            f"- {i['issue']} | Count: {i['count']} | Severity: {i['severity']} | Churn/Critical Signals: {i.get('critical_count', 0)} | Samples: \"{' | '.join([s.get('verbatim', '') for s in i.get('samples', [])[:3]])}\""
+            f"- {i['issue']} | Count: {i['count']} | Severity: {i['severity']} | Churn/Critical Signals: {i.get('critical_count', 0)} | Samples: \"{' | '.join(format_sample(s) for s in i.get('samples', [])[:3])}\""
             for i in critical_issues
         ])
 

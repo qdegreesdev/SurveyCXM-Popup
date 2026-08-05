@@ -56,6 +56,9 @@ app.add_middleware(
 
 app.include_router(popup_router, prefix="/api", tags=["Popup Intelligence"])
 
+from routes.review_suggestion import router as review_suggestion_router
+app.include_router(review_suggestion_router, prefix="/api", tags=["Review Suggestion"])
+
 
 @app.on_event("startup")
 async def startup():

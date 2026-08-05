@@ -435,6 +435,22 @@ class DatabaseService:
         fh_table = f"filter_hierarchy_{survey_id}"
         labels = self._get_filter_labels(survey_id)
 
+        col_rows = self._execute_query(f"SHOW COLUMNS FROM {nr_table}")
+        existing_cols = {row['Field'].lower() for row in col_rows} if col_rows else set()
+
+        select_cols = []
+        join_clauses = []
+        for i in range(1, 5):
+            f_col = f"f{i}"
+            if f_col in existing_cols:
+                select_cols.append(f"fh{i}.value AS {f_col}_val")
+                join_clauses.append(f"LEFT JOIN {fh_table} fh{i} ON nr.{f_col} = fh{i}.id AND fh{i}.level = {i}")
+            else:
+                select_cols.append(f"NULL AS {f_col}_val")
+
+        select_str = ",\n                ".join(select_cols)
+        join_str = "\n            ".join(join_clauses)
+
         rows = self._execute_query(
             f"""
             SELECT
@@ -446,26 +462,20 @@ class DatabaseService:
                 v.sentiment,
                 v.is_critical,
                 v.created_at,
-                fh1.value            AS f1_val,
-                fh2.value            AS f2_val,
-                fh3.value            AS f3_val,
-                fh4.value            AS f4_val
+                {select_str}
             FROM voc_alerts v
             LEFT JOIN {nr_table} nr ON v.survey_res_id = nr.id
-            LEFT JOIN {fh_table} fh1 ON nr.f1 = fh1.id AND fh1.level = 1
-            LEFT JOIN {fh_table} fh2 ON nr.f2 = fh2.id AND fh2.level = 2
-            LEFT JOIN {fh_table} fh3 ON nr.f3 = fh3.id AND fh3.level = 3
-            LEFT JOIN {fh_table} fh4 ON nr.f4 = fh4.id AND fh4.level = 4
+            {join_str}
             WHERE v.survey_id = %s
               AND v.sentiment = 'Negative'
               AND v.created_at >= %s
               AND v.created_at  < %s
               AND (
-                    v.priority_level IN ('high', 'critical', 'urgent', 'medium')
+                    LOWER(v.priority_level) IN ('high', 'critical', 'urgent', 'medium')
                     OR v.is_critical = 1
               )
             ORDER BY
-                CASE v.priority_level
+                CASE LOWER(v.priority_level)
                     WHEN 'critical' THEN 1
                     WHEN 'urgent'   THEN 2
                     WHEN 'high'     THEN 3
@@ -481,6 +491,7 @@ class DatabaseService:
         critical_keyword_set = {"churn intent", "escalation language", "complaint signals", "abusive experience"}
 
         records = []
+        print(f"DEBUG DB: Survey {survey_id} retrieved {len(rows)} raw rows.")
         for row in rows:
             priority       = (row.get("priority_level") or "").lower().strip()
             severity_score = priority_score_map.get(priority, 80)
@@ -575,18 +586,19 @@ class DatabaseService:
                 logger.error(f"Error querying 'survey_id' from surveys: {ex}")
         return []
 
-    def get_user_name_by_id(self, client_id: int) -> str:
-        """Query the users table to get the human-readable name of the client."""
-        if not self._check_table_exists("users"):
-            logger.warning("users table does not exist")
-            return f"User {client_id}"
+
+    def get_client_by_id(self, client_id: int) -> dict | None:
+        """Query the clients table to validate the client and retrieve basic info."""
+        if not self._check_table_exists("clients"):
+            logger.warning("clients table does not exist")
+            return None
         try:
-            rows = self._execute_query("SELECT name FROM users WHERE id = %s", (client_id,))
-            if rows and rows[0].get("name"):
-                return rows[0]["name"]
+            rows = self._execute_query("SELECT id, company_name FROM clients WHERE id = %s AND is_deleted = 0", (client_id,))
+            if rows:
+                return rows[0]
         except Exception as e:
-            logger.error(f"Error querying user name: {e}")
-        return f"User {client_id}"
+            logger.error(f"Error querying client: {e}")
+        return None
 
     def get_nps_data_for_surveys(self, survey_ids: list[int], last_login_dt: datetime, now_dt: datetime) -> dict[str, Any]:
         """

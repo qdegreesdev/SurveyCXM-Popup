@@ -17,9 +17,24 @@ def run_tests():
     print(f"Health Status: {response.status_code}")
     print(f"Health Response: {response.json()}\n")
     
+    print("\n--- Testing Invalid API Key ---")
+    form_data_invalid = {
+        "client_id": "13",
+        "user_last_login_date": "2023-10-01",
+        "user_current_login_date": "2023-10-10",
+        "secretKey": "wrong_secret"
+    }
+    response_invalid = client.post("/api/login-popup-summary", data=form_data_invalid)
+    print(f"Invalid API Key Status: {response_invalid.status_code}")
+    if response_invalid.status_code == 401:
+        print("  [SUCCESS] API correctly rejected invalid secretKey (401).")
+    else:
+        print(f"  [FAILED] Expected 401, got {response_invalid.status_code}. Response: {response_invalid.text}")
+    print("-----------------------------------------\n")
+
     print("Testing /api/login-popup-summary...")
     form_data = {
-        "client_id": "2",
+        "client_id": "13",
         "user_last_login_date": "2023-10-01",
         "user_current_login_date": "2023-10-10",
         "secretKey": "my_secret_123"
@@ -59,9 +74,25 @@ def run_tests():
         print(f"  [FAILED] Failed! Error: {response.text}")
 
     print("\n-----------------------------------------")
+    print("Testing /api/ask-ai with Invalid API Key...")
+    form_data_ask_invalid = {
+        "client_id": "13",
+        "user_last_login_date": "2023-10-01",
+        "user_current_login_date": "2023-10-10",
+        "question": "What is the top issue?",
+        "secretKey": "wrong_secret"
+    }
+    response_ask_invalid = client.post("/api/ask-ai", data=form_data_ask_invalid)
+    print(f"Invalid API Key Status: {response_ask_invalid.status_code}")
+    if response_ask_invalid.status_code == 401:
+        print("  [SUCCESS] Ask-AI correctly rejected invalid secretKey (401).")
+    else:
+        print(f"  [FAILED] Expected 401, got {response_ask_invalid.status_code}. Response: {response_ask_invalid.text}")
+    print("-----------------------------------------\n")
+
     print("Testing /api/ask-ai...")
     form_data_ask = {
-        "client_id": "2",
+        "client_id": "13",
         "user_last_login_date": "2023-10-01",
         "user_current_login_date": "2023-10-10",
         "question": "What is the top issue?",

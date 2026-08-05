@@ -64,11 +64,12 @@ async def ask_ai(
     db = get_db_service()
     survey_ids = []
     if db and database.DB_AVAILABLE and not settings.use_mock_data:
+        client_info = db.get_client_by_id(client_id)
+        if not client_info:
+            return {"answer": "Invalid client ID or client is inactive."}
         survey_ids = db.get_survey_ids_by_client(client_id)
         if not survey_ids:
-            survey_ids = [client_id]
-    else:
-        survey_ids = [client_id]
+            return {"answer": "No active surveys found for this client."}
 
     if not database.DB_AVAILABLE or settings.use_mock_data or db is None:
         return {"answer": "Database is unavailable. Cannot answer questions without real time data."}
@@ -134,7 +135,7 @@ async def login_popup_summary(
             summary_audio_filename = f"tts_{uuid.uuid4().hex}.mp3"
             background_tasks.add_task(generate_audio_file, text=summary_text, filename=summary_audio_filename)
             return {
-                "greeting": f"Good day User {client_id}",
+                "greeting": f"Good day Client {client_id}",
                 "ai_summary": "<p><strong>Database is unavailable.</strong> Cannot fetch real time data for your briefing.</p>",
                 "ai_summary_audio_url": f"{base_url}/api/audio/{summary_audio_filename}" if summary_audio_filename else None,
                 "top_alert_VOC": [],
@@ -142,8 +143,23 @@ async def login_popup_summary(
                 "is_data_found": 0
             }
 
-        # 1. Fetch User Name
-        user_name = db.get_user_name_by_id(client_id)
+        # 0. Validate Client
+        client_info = db.get_client_by_id(client_id)
+        if not client_info:
+            summary_text = "Invalid client ID or client is inactive."
+            summary_audio_filename = f"tts_{uuid.uuid4().hex}.mp3"
+            background_tasks.add_task(generate_audio_file, text=summary_text, filename=summary_audio_filename)
+            return {
+                "greeting": f"Good day Client {client_id}",
+                "ai_summary": "<p><strong>Invalid client ID.</strong> Cannot fetch data.</p>",
+                "ai_summary_audio_url": f"{base_url}/api/audio/{summary_audio_filename}" if summary_audio_filename else None,
+                "top_alert_VOC": [],
+                "voc_audio_url": None,
+                "is_data_found": 0
+            }
+
+        # 1. Fetch Client Name
+        client_name = client_info.get("company_name", f"Client {client_id}")
         
         hour = datetime.now().hour
         greeting_time = "Good Morning"
@@ -151,12 +167,21 @@ async def login_popup_summary(
             greeting_time = "Good Afternoon"
         elif hour >= 17:
             greeting_time = "Good Evening"
-        greeting = f"{greeting_time}, {user_name}"
+        greeting = f"{greeting_time}, {client_name}"
         # 2. Fetch surveys
         survey_ids = db.get_survey_ids_by_client(client_id)
         if not survey_ids:
-            survey_ids = [client_id]
-
+            summary_text = f"Welcome back! Currently, there are no active surveys associated with your account."
+            summary_audio_filename = f"tts_{uuid.uuid4().hex}.mp3"
+            background_tasks.add_task(generate_audio_file, text=summary_text, filename=summary_audio_filename)
+            return {
+                "greeting": greeting,
+                "ai_summary": f"<p>{summary_text}</p>",
+                "ai_summary_audio_url": f"{base_url}/api/audio/{summary_audio_filename}" if summary_audio_filename else None,
+                "top_alert_VOC": [],
+                "voc_audio_url": None,
+                "is_data_found": 0
+            }
         # 3. Fetch analytics
         import asyncio
         nps_data = await asyncio.to_thread(db.get_nps_data_for_surveys, survey_ids, last_login_dt, current_login_dt)
