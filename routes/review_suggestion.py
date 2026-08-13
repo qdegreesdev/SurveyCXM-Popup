@@ -37,8 +37,8 @@ def get_review_suggestion(
             raise HTTPException(status_code=400, detail="survey_summary must be a JSON list")
         
         # Pass the parsed data to the service
-        suggestion = generate_review_suggestion(survey_data)
-        return {"suggestion": suggestion}
+        suggestions = generate_review_suggestion(survey_data)
+        return {"suggestions": suggestions}
         
     except json.JSONDecodeError as e:
         logger.error(f"JSONDecodeError: {e} | Payload after cleaning: {survey_summary}")
