@@ -2967,3 +2967,43 @@ asyncio.exceptions.CancelledError
 2026-08-05 12:40:26.924 | INFO     | logging:callHandlers:1737 - Application shutdown complete.
 2026-08-05 12:40:26.925 | INFO     | logging:callHandlers:1737 - Finished server process [14184]
 2026-08-05 12:40:27.139 | INFO     | logging:callHandlers:1737 - Stopping reloader process [5848]
+2026-08-05 15:12:45.307 | INFO     | logging:callHandlers:1737 - Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2026-08-05 15:12:45.308 | INFO     | logging:callHandlers:1737 - Started reloader process [12884] using StatReload
+2026-08-05 15:12:47.296 | INFO     | logging:callHandlers:1737 - Started server process [4928]
+2026-08-05 15:12:47.297 | INFO     | logging:callHandlers:1737 - Waiting for application startup.
+2026-08-05 15:12:47.298 | INFO     | main:startup:65 - 🚀 SurveyCXM Popup API starting up...
+2026-08-05 15:12:49.237 | INFO     | main:startup:68 - ✅ Database pre-warmed successfully
+2026-08-05 15:12:49.239 | INFO     | main:startup:73 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-05 15:12:49.240 | INFO     | logging:callHandlers:1737 - Application startup complete.
+2026-08-05 15:12:52.128 | INFO     | logging:callHandlers:1737 - 127.0.0.1:59713 - "GET / HTTP/1.1" 200
+2026-08-05 15:12:55.274 | INFO     | logging:callHandlers:1737 - 127.0.0.1:59713 - "GET /docs HTTP/1.1" 200
+2026-08-05 15:12:55.357 | INFO     | logging:callHandlers:1737 - 127.0.0.1:59713 - "GET /openapi.json HTTP/1.1" 200
+2026-08-05 16:30:34.183 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'routes\popup.py'. Reloading...
+2026-08-05 16:30:34.303 | INFO     | logging:callHandlers:1737 - Shutting down
+2026-08-05 16:30:34.422 | INFO     | logging:callHandlers:1737 - Waiting for application shutdown.
+2026-08-05 16:30:34.429 | INFO     | logging:callHandlers:1737 - Application shutdown complete.
+2026-08-05 16:30:34.440 | INFO     | logging:callHandlers:1737 - Finished server process [4928]
+2026-08-05 16:30:38.865 | INFO     | logging:callHandlers:1737 - Started server process [19636]
+2026-08-05 16:30:38.865 | INFO     | logging:callHandlers:1737 - Waiting for application startup.
+2026-08-05 16:30:38.866 | INFO     | main:startup:65 - 🚀 SurveyCXM Popup API starting up...
+2026-08-05 16:30:40.219 | INFO     | main:startup:68 - ✅ Database pre-warmed successfully
+2026-08-05 16:30:40.219 | INFO     | main:startup:73 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-05 16:30:40.220 | INFO     | logging:callHandlers:1737 - Application startup complete.
+2026-08-05 16:31:18.042 | ERROR    | services.ai_service:generate_ai_summary:128 - AI summary error: Expecting ',' delimiter: line 170 column 73 (char 5739)
+2026-08-05 16:31:18.044 | INFO     | logging:callHandlers:1737 - 127.0.0.1:62027 - "POST /api/login-popup-summary HTTP/1.1" 200
+2026-08-05 16:31:18.052 | INFO     | services.tts_service:cleanup_old_audio_files:62 - Cleaned up old audio file: D:\SUNIL KUMAWAT\POPUP_PROJECTS\Surveycxm_popup\static\audio\tts_285d0f4696394a508de7c43d2db31825.mp3
+2026-08-05 16:31:18.054 | INFO     | services.tts_service:cleanup_old_audio_files:62 - Cleaned up old audio file: D:\SUNIL KUMAWAT\POPUP_PROJECTS\Surveycxm_popup\static\audio\tts_66dc5959ccb5414ba5fffcead1f1b84a.mp3
+2026-08-05 16:31:18.055 | INFO     | services.tts_service:cleanup_old_audio_files:62 - Cleaned up old audio file: D:\SUNIL KUMAWAT\POPUP_PROJECTS\Surveycxm_popup\static\audio\tts_954a923bc94c4117b7f0c09905675c5d.mp3
+2026-08-05 16:31:18.056 | INFO     | services.tts_service:cleanup_old_audio_files:62 - Cleaned up old audio file: D:\SUNIL KUMAWAT\POPUP_PROJECTS\Surveycxm_popup\static\audio\tts_ada7874a266a49abb6f5bf6cf3907627.mp3
+2026-08-05 16:31:18.057 | INFO     | services.tts_service:cleanup_old_audio_files:62 - Cleaned up old audio file: D:\SUNIL KUMAWAT\POPUP_PROJECTS\Surveycxm_popup\static\audio\tts_dad90ff6a91b480cb14452edd1d86b6f.mp3
+2026-08-05 16:36:51.634 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'routes\popup.py'. Reloading...
+2026-08-05 16:36:51.737 | INFO     | logging:callHandlers:1737 - Shutting down
+2026-08-05 16:36:51.854 | INFO     | logging:callHandlers:1737 - Waiting for application shutdown.
+2026-08-05 16:36:51.855 | INFO     | logging:callHandlers:1737 - Application shutdown complete.
+2026-08-05 16:36:51.857 | INFO     | logging:callHandlers:1737 - Finished server process [19636]
+2026-08-05 16:36:54.591 | INFO     | logging:callHandlers:1737 - Started server process [17404]
+2026-08-05 16:36:54.591 | INFO     | logging:callHandlers:1737 - Waiting for application startup.
+2026-08-05 16:36:54.592 | INFO     | main:startup:65 - 🚀 SurveyCXM Popup API starting up...
+2026-08-05 16:36:55.797 | INFO     | main:startup:68 - ✅ Database pre-warmed successfully
+2026-08-05 16:36:55.797 | INFO     | main:startup:73 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-05 16:36:55.798 | INFO     | logging:callHandlers:1737 - Application startup complete.

@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 class Settings(BaseSettings):
-    # ── MySQL (matches your existing naming convention) ─────────────
+    # ── MySQL (matches your existing naming convention) ─────────
     survey_db_host: str = "localhost"
     survey_db_port: int = 3306
     survey_db_name: str = "surveycxm"

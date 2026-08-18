@@ -20,11 +20,10 @@ def generate_review_suggestion(survey_summary: list) -> list:
 
         prompt = f"""
 You are an expert copywriter.
-Based on the following survey questions and answers provided by a customer, generate EXACTLY 3 distinct review suggestions (each under 25 words).
+Based on the following survey questions and answers provided by a customer, generate EXACTLY 3 distinct review suggestions (each under 15 words).
 The reviews MUST be written from the user's perspective (first-person, using "I", "my") as if they are writing a final review to post online.
 They should naturally summarize their overall sentiment and key feedback from the answers, with slight variations in tone or focus.
 Provide the output strictly as a JSON object with a single key "suggestions" containing an array of the 3 string suggestions.
-
 SURVEY RESPONSES:
 {qa_text}
 """

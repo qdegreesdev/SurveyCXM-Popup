@@ -34,15 +34,9 @@ def run_test():
     response = client.post("/api/survey_review_suggestion", data=form_data)
     
     print(f"Status: {response.status_code}")
-    if response.status_code == 200:
-        data = response.json()
-        print("Success! JSON Response:")
-        suggestions = data.get("suggestions", [])
-        print(f"Number of suggestions returned: {len(suggestions)}")
-        for i, sug in enumerate(suggestions):
-            print(f"  Suggestion {i+1}: {sug}")
-    else:
-        print(f"Failed! Error: {response.text}")
+    print("--- ACTUAL RAW API RESPONSE ---")
+    print(response.text)
+    print("-------------------------------")
 
 if __name__ == "__main__":
     run_test()
