@@ -28,8 +28,14 @@ class Settings(BaseSettings):
     # ── Environment ─────────────────────────────────────────────────
     environment: str = "local"
 
-    # ── Security ────────────────────────────────────────────────────
+    # ── Security & Limits ───────────────────────────────────────────
     admin_secret: str = "change_me"
+    api_secret_key: str = "my_secret_123"
+    max_question_length: int = 500
+    max_survey_summary_items: int = 50
+    rate_limit_ask_ai: int = 15
+    rate_limit_popup_summary: int = 30
+    rate_limit_review_suggestion: int = 20
 
     @property
     def cors_origins_list(self) -> list[str]:

@@ -7,44 +7,62 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import logging
-from fastapi import FastAPI
+import secrets
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.openapi.utils import get_openapi
 from loguru import logger
 
-class InterceptHandler(logging.Handler):
-    def emit(self, record):
-        try:
-            level = logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
-
-        frame, depth = logging.currentframe(), 2
-        while frame and frame.f_code.co_filename == logging.__file__:
-            frame = frame.f_back
-            depth += 1
-
-        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+from config import settings
+from routes.popup import router as popup_router
+from database import get_db_service
 
 # Configure logger to write to a file
 logger.add("app.log", rotation="5 MB", retention="10 days", enqueue=True)
 
-# Intercept uvicorn logs
-for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-    logging_logger = logging.getLogger(logger_name)
-    logging_logger.handlers = [InterceptHandler()]
-    logging_logger.propagate = False
+security = HTTPBasic()
 
-from routes.popup import router as popup_router
-from config import settings
-
-# Pre-warm DB connection on startup
-from database import get_db_service
+def verify_docs_auth(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username.strip(), "admin")
+    correct_password = secrets.compare_digest(credentials.password.strip(), settings.admin_secret)
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect admin credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials
 
 app = FastAPI(
     title="SurveyCXM Login Intelligence Popup API",
     description="Delivers NPS delta, demographic breakdown, critical issues, and AI summary on login",
     version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
+
+@app.get("/docs", include_in_schema=False)
+async def get_protected_docs(credentials: HTTPBasicCredentials = Depends(verify_docs_auth)):
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="SurveyCXM API Docs")
+
+@app.get("/redoc", include_in_schema=False)
+async def get_protected_redoc(credentials: HTTPBasicCredentials = Depends(verify_docs_auth)):
+    return get_redoc_html(openapi_url="/openapi.json", title="SurveyCXM API ReDoc")
+
+@app.get("/openapi.json", include_in_schema=False)
+async def get_protected_openapi(credentials: HTTPBasicCredentials = Depends(verify_docs_auth)):
+    return get_openapi(title=app.title, version=app.version, description=app.description, routes=app.routes)
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 app.add_middleware(
     CORSMiddleware,

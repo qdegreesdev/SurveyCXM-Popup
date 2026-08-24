@@ -21,3 +21,7 @@ __pycache__/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Logs and Audio files
+app.log
+static/audio/*.mp3
