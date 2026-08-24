@@ -113,7 +113,13 @@ Provide JSON with:
             response_format={"type": "json_object"},
         )
 
-        result = json.loads(response.choices[0].message.content)
+        raw_content = response.choices[0].message.content
+        try:
+            result = json.loads(raw_content, strict=False)
+        except json.JSONDecodeError:
+            # Fallback cleanup for unescaped control characters
+            clean_content = raw_content.replace("\n", " ").replace("\r", "")
+            result = json.loads(clean_content, strict=False)
         summary_text = result.get("summary", "")
         if html_format:
             summary_text = summary_text.replace("\n", "<br>")

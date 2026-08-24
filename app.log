@@ -3007,3 +3007,167 @@ asyncio.exceptions.CancelledError
 2026-08-05 16:36:55.797 | INFO     | main:startup:68 - ✅ Database pre-warmed successfully
 2026-08-05 16:36:55.797 | INFO     | main:startup:73 - 🌐 API is available at: http://127.0.0.1:8000/
 2026-08-05 16:36:55.798 | INFO     | logging:callHandlers:1737 - Application startup complete.
+2026-08-24 12:21:12.442 | ERROR    | services.review_suggestion_service:generate_review_suggestion:50 - Review suggestion AI error: Error code: 429 - {'error': {'message': 'You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.', 'type': 'insufficient_quota', 'param': None, 'code': 'credit_balance_exhausted'}}
+2026-08-24 12:26:24.882 | INFO     | logging:callHandlers:1737 - Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+2026-08-24 12:26:24.883 | INFO     | logging:callHandlers:1737 - Started reloader process [17112] using StatReload
+2026-08-24 12:26:26.650 | INFO     | logging:callHandlers:1737 - Started server process [2944]
+2026-08-24 12:26:26.650 | INFO     | logging:callHandlers:1737 - Waiting for application startup.
+2026-08-24 12:26:26.651 | INFO     | main:startup:78 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 12:26:28.738 | INFO     | main:startup:81 - ✅ Database pre-warmed successfully
+2026-08-24 12:26:28.740 | INFO     | main:startup:86 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 12:26:28.741 | INFO     | logging:callHandlers:1737 - Application startup complete.
+2026-08-24 12:32:33.717 | INFO     | logging:callHandlers:1737 - 127.0.0.1:51853 - "GET / HTTP/1.1" 200
+2026-08-24 12:32:33.753 | INFO     | logging:callHandlers:1737 - 127.0.0.1:51853 - "GET /favicon.ico HTTP/1.1" 404
+2026-08-24 12:39:50.435 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52032 - "GET /docs HTTP/1.1" 200
+2026-08-24 12:39:51.376 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52032 - "GET /openapi.json HTTP/1.1" 200
+2026-08-24 12:40:16.232 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52047 - "GET /api/logs?lines=100 HTTP/1.1" 200
+2026-08-24 12:41:05.633 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52050 - "GET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1" 404
+2026-08-24 12:41:23.999 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'services\ai_service.py'. Reloading...
+2026-08-24 12:41:24.034 | INFO     | logging:callHandlers:1737 - Shutting down
+2026-08-24 12:41:24.142 | INFO     | logging:callHandlers:1737 - Waiting for application shutdown.
+2026-08-24 12:41:24.143 | INFO     | logging:callHandlers:1737 - Application shutdown complete.
+2026-08-24 12:41:24.143 | INFO     | logging:callHandlers:1737 - Finished server process [2944]
+2026-08-24 12:41:26.410 | INFO     | logging:callHandlers:1737 - Started server process [12020]
+2026-08-24 12:41:26.411 | INFO     | logging:callHandlers:1737 - Waiting for application startup.
+2026-08-24 12:41:26.412 | INFO     | main:startup:78 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 12:41:28.230 | INFO     | main:startup:81 - ✅ Database pre-warmed successfully
+2026-08-24 12:41:28.231 | INFO     | main:startup:86 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 12:41:28.231 | INFO     | logging:callHandlers:1737 - Application startup complete.
+2026-08-24 12:42:25.900 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52079 - "GET / HTTP/1.1" 200
+2026-08-24 12:42:28.762 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52079 - "GET /docs HTTP/1.1" 200
+2026-08-24 12:42:28.947 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52079 - "GET /openapi.json HTTP/1.1" 200
+2026-08-24 12:42:35.350 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52082 - "GET /api/health HTTP/1.1" 200
+2026-08-24 12:43:48.594 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'routes\popup.py'. Reloading...
+2026-08-24 12:43:48.612 | INFO     | logging:callHandlers:1737 - Shutting down
+2026-08-24 12:43:48.729 | INFO     | logging:callHandlers:1737 - Waiting for application shutdown.
+2026-08-24 12:43:48.731 | INFO     | logging:callHandlers:1737 - Application shutdown complete.
+2026-08-24 12:43:48.732 | INFO     | logging:callHandlers:1737 - Finished server process [12020]
+2026-08-24 12:43:50.840 | INFO     | logging:callHandlers:1737 - Started server process [5932]
+2026-08-24 12:43:50.841 | INFO     | logging:callHandlers:1737 - Waiting for application startup.
+2026-08-24 12:43:50.842 | INFO     | main:startup:78 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 12:43:51.923 | INFO     | main:startup:81 - ✅ Database pre-warmed successfully
+2026-08-24 12:43:51.924 | INFO     | main:startup:86 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 12:43:51.925 | INFO     | logging:callHandlers:1737 - Application startup complete.
+2026-08-24 12:43:53.826 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'routes\popup.py'. Reloading...
+2026-08-24 12:43:53.839 | INFO     | logging:callHandlers:1737 - Shutting down
+2026-08-24 12:43:53.942 | INFO     | logging:callHandlers:1737 - Waiting for application shutdown.
+2026-08-24 12:43:53.943 | INFO     | logging:callHandlers:1737 - Application shutdown complete.
+2026-08-24 12:43:53.943 | INFO     | logging:callHandlers:1737 - Finished server process [5932]
+2026-08-24 12:43:56.031 | INFO     | logging:callHandlers:1737 - Started server process [14908]
+2026-08-24 12:43:56.032 | INFO     | logging:callHandlers:1737 - Waiting for application startup.
+2026-08-24 12:43:56.033 | INFO     | main:startup:78 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 12:43:56.859 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'routes\popup.py'. Reloading...
+2026-08-24 12:43:57.063 | INFO     | main:startup:81 - ✅ Database pre-warmed successfully
+2026-08-24 12:43:57.064 | INFO     | main:startup:86 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 12:43:57.065 | INFO     | logging:callHandlers:1737 - Application startup complete.
+2026-08-24 12:43:57.065 | INFO     | logging:callHandlers:1737 - Shutting down
+2026-08-24 12:43:57.170 | INFO     | logging:callHandlers:1737 - Waiting for application shutdown.
+2026-08-24 12:43:57.172 | INFO     | logging:callHandlers:1737 - Application shutdown complete.
+2026-08-24 12:43:57.173 | INFO     | logging:callHandlers:1737 - Finished server process [14908]
+2026-08-24 12:43:59.325 | INFO     | logging:callHandlers:1737 - Started server process [3668]
+2026-08-24 12:43:59.326 | INFO     | logging:callHandlers:1737 - Waiting for application startup.
+2026-08-24 12:43:59.326 | INFO     | main:startup:78 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 12:44:00.537 | INFO     | main:startup:81 - ✅ Database pre-warmed successfully
+2026-08-24 12:44:00.538 | INFO     | main:startup:86 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 12:44:00.539 | INFO     | logging:callHandlers:1737 - Application startup complete.
+2026-08-24 12:44:02.741 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'routes\review_suggestion.py'. Reloading...
+2026-08-24 12:44:02.754 | INFO     | logging:callHandlers:1737 - Shutting down
+2026-08-24 12:44:02.864 | INFO     | logging:callHandlers:1737 - Waiting for application shutdown.
+2026-08-24 12:44:02.866 | INFO     | logging:callHandlers:1737 - Application shutdown complete.
+2026-08-24 12:44:02.868 | INFO     | logging:callHandlers:1737 - Finished server process [3668]
+2026-08-24 12:44:05.321 | INFO     | logging:callHandlers:1737 - Started server process [11844]
+2026-08-24 12:44:05.322 | INFO     | logging:callHandlers:1737 - Waiting for application startup.
+2026-08-24 12:44:05.323 | INFO     | main:startup:78 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 12:44:06.225 | INFO     | main:startup:81 - ✅ Database pre-warmed successfully
+2026-08-24 12:44:06.226 | INFO     | main:startup:86 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 12:44:06.226 | INFO     | logging:callHandlers:1737 - Application startup complete.
+2026-08-24 12:44:13.746 | INFO     | routes.popup:ask_ai:78 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 12:44:13.760 | INFO     | routes.review_suggestion:get_review_suggestion:27 - API Request: POST /api/survey_review_suggestion
+2026-08-24 12:44:13.763 | INFO     | routes.review_suggestion:get_review_suggestion:27 - API Request: POST /api/survey_review_suggestion
+2026-08-24 12:44:33.139 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52170 - "GET /docs HTTP/1.1" 200
+2026-08-24 12:44:33.207 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52170 - "GET /openapi.json HTTP/1.1" 200
+2026-08-24 12:44:43.000 | INFO     | logging:callHandlers:1737 - 127.0.0.1:52171 - "GET /api/logs?lines=100 HTTP/1.1" 200
+2026-08-24 12:48:51.349 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'main.py'. Reloading...
+2026-08-24 12:48:51.414 | INFO     | logging:callHandlers:1737 - Shutting down
+2026-08-24 12:48:51.522 | INFO     | logging:callHandlers:1737 - Waiting for application shutdown.
+2026-08-24 12:48:51.523 | INFO     | logging:callHandlers:1737 - Application shutdown complete.
+2026-08-24 12:48:51.524 | INFO     | logging:callHandlers:1737 - Finished server process [11844]
+2026-08-24 12:48:57.939 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'main.py'. Reloading...
+2026-08-24 12:49:00.528 | INFO     | main:startup:83 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 12:49:01.405 | INFO     | main:startup:86 - ✅ Database pre-warmed successfully
+2026-08-24 12:49:01.406 | INFO     | main:startup:91 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 12:49:33.162 | INFO     | routes.popup:ask_ai:78 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 12:49:33.171 | INFO     | routes.review_suggestion:get_review_suggestion:27 - API Request: POST /api/survey_review_suggestion
+2026-08-24 12:49:33.174 | INFO     | routes.review_suggestion:get_review_suggestion:27 - API Request: POST /api/survey_review_suggestion
+2026-08-24 12:49:40.169 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'test_security.py'. Reloading...
+2026-08-24 12:49:42.460 | INFO     | main:startup:83 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 12:49:44.370 | INFO     | main:startup:86 - ✅ Database pre-warmed successfully
+2026-08-24 12:49:44.371 | INFO     | main:startup:91 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 12:49:48.744 | INFO     | routes.popup:ask_ai:78 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 12:49:48.758 | INFO     | routes.review_suggestion:get_review_suggestion:27 - API Request: POST /api/survey_review_suggestion
+2026-08-24 12:49:48.763 | INFO     | routes.review_suggestion:get_review_suggestion:27 - API Request: POST /api/survey_review_suggestion
+2026-08-24 12:49:55.019 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'test_security.py'. Reloading...
+2026-08-24 12:49:57.333 | INFO     | main:startup:83 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 12:50:00.540 | INFO     | main:startup:86 - ✅ Database pre-warmed successfully
+2026-08-24 12:50:00.541 | INFO     | main:startup:91 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 12:50:07.924 | INFO     | routes.popup:ask_ai:78 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 12:50:07.940 | INFO     | routes.review_suggestion:get_review_suggestion:27 - API Request: POST /api/survey_review_suggestion
+2026-08-24 12:50:07.947 | INFO     | routes.review_suggestion:get_review_suggestion:27 - API Request: POST /api/survey_review_suggestion
+2026-08-24 13:39:41.143 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'config.py'. Reloading...
+2026-08-24 13:39:43.845 | INFO     | main:startup:83 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 13:39:44.852 | INFO     | main:startup:86 - ✅ Database pre-warmed successfully
+2026-08-24 13:39:44.853 | INFO     | main:startup:91 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 13:39:53.858 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'routes\popup.py'. Reloading...
+2026-08-24 13:39:56.551 | INFO     | main:startup:83 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 13:39:57.721 | INFO     | main:startup:86 - ✅ Database pre-warmed successfully
+2026-08-24 13:39:57.722 | INFO     | main:startup:91 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 13:40:00.807 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'routes\popup.py'. Reloading...
+2026-08-24 13:40:03.314 | INFO     | main:startup:83 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 13:40:05.068 | INFO     | main:startup:86 - ✅ Database pre-warmed successfully
+2026-08-24 13:40:05.070 | INFO     | main:startup:91 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 13:40:11.130 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'routes\review_suggestion.py'. Reloading...
+2026-08-24 13:40:13.461 | INFO     | main:startup:83 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 13:40:15.119 | INFO     | main:startup:86 - ✅ Database pre-warmed successfully
+2026-08-24 13:40:15.120 | INFO     | main:startup:91 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 13:40:21.546 | WARNING  | logging:callHandlers:1737 - StatReload detected changes in 'test_security.py'. Reloading...
+2026-08-24 13:40:23.787 | INFO     | main:startup:83 - 🚀 SurveyCXM Popup API starting up...
+2026-08-24 13:40:26.181 | INFO     | main:startup:86 - ✅ Database pre-warmed successfully
+2026-08-24 13:40:26.181 | INFO     | main:startup:91 - 🌐 API is available at: http://127.0.0.1:8000/
+2026-08-24 13:40:44.980 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:45.009 | INFO     | routes.review_suggestion:get_review_suggestion:30 - API Request: POST /api/survey_review_suggestion
+2026-08-24 13:40:45.036 | INFO     | routes.review_suggestion:get_review_suggestion:30 - API Request: POST /api/survey_review_suggestion
+2026-08-24 13:40:45.114 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:47.100 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:47.597 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:48.087 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:48.602 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:49.349 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:49.739 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:49.973 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:50.210 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:50.406 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:50.637 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:50.887 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:51.129 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:51.363 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:51.617 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:40:51.831 | WARNING  | services.rate_limiter:check_rate_limit:50 - Rate limit exceeded for IP testclient on endpoint 'ask_ai'. Count: 15/15 in 60s.
+2026-08-24 13:45:11.577 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:11.593 | INFO     | routes.review_suggestion:get_review_suggestion:30 - API Request: POST /api/survey_review_suggestion
+2026-08-24 13:45:11.599 | INFO     | routes.review_suggestion:get_review_suggestion:30 - API Request: POST /api/survey_review_suggestion
+2026-08-24 13:45:11.686 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:12.971 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:13.175 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:13.371 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:13.587 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:13.806 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:14.240 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:14.757 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:15.239 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:15.855 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:16.146 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:16.333 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:16.511 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:16.692 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:16.887 | INFO     | routes.popup:ask_ai:82 - API Request: POST /api/ask-ai | client_id=1
+2026-08-24 13:45:17.079 | WARNING  | services.rate_limiter:check_rate_limit:50 - Rate limit exceeded for IP testclient on endpoint 'ask_ai'. Count: 15/15 in 60s.

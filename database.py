@@ -100,7 +100,8 @@ class DatabaseService:
 
     @staticmethod
     def _safe_slug(slug: str) -> str:
-        return f"`{slug.strip('`')}`"
+        clean_slug = str(slug).replace("`", "")
+        return f"`{clean_slug}`"
 
     @staticmethod
     def _to_date(val) -> date:

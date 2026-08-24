@@ -22,39 +22,70 @@ from database import get_db_service
 from services.ai_service import generate_ai_summary, answer_user_question
 from services.mock_data import get_mock_popup_data
 from services.tts_service import generate_audio_file
+import secrets
 from services.popup_service import parse_datetime, aggregate_issues, _DEFAULT_LAST_LOGIN_HOURS
 
 router = APIRouter()
 
+def verify_secret(provided_key: str, expected_key: str) -> bool:
+    if not provided_key or not expected_key:
+        return False
+    clean_provided = provided_key.strip('"')
+    clean_expected = expected_key.strip('"')
+    return secrets.compare_digest(clean_provided, clean_expected)
+
 def verify_admin(x_admin_secret: str = Header(None)):
-    if not x_admin_secret or x_admin_secret != settings.admin_secret:
+    if not x_admin_secret or not verify_secret(x_admin_secret, settings.admin_secret):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 @router.get("/audio/{filename}")
 async def get_audio(filename: str):
     import asyncio
-    filepath = os.path.join("static", "audio", filename)
-    
+    # Security: Prevent Path Traversal attacks
+    clean_filename = os.path.basename(filename)
+    if clean_filename != filename or not filename.endswith(".mp3"):
+        raise HTTPException(status_code=400, detail="Invalid audio filename")
+
+    audio_dir = os.path.abspath(os.path.join("static", "audio"))
+    filepath = os.path.abspath(os.path.join(audio_dir, filename))
+
+    if not filepath.startswith(audio_dir):
+        raise HTTPException(status_code=400, detail="Access denied")
+
     # Wait up to 30 seconds for the audio file to be generated in the background
     for _ in range(60):
         if os.path.exists(filepath):
             return FileResponse(filepath, media_type="audio/mpeg")
         await asyncio.sleep(0.5)
-        
+
     raise HTTPException(status_code=404, detail="Audio file not found or generation timed out")
 
 
+from services.rate_limiter import rate_limiter
 
 @router.post("/ask-ai")
 async def ask_ai(
+    request: Request,
     client_id: int = Form(...),
     user_last_login_date: str = Form(...),
     user_current_login_date: str = Form(...),
     question: str = Form(...),
     secretKey: str = Form(...)
 ):
-    if secretKey != "my_secret_123":
+    rate_limiter.check_rate_limit(request, "ask_ai", settings.rate_limit_ask_ai)
+    if not (verify_secret(secretKey, settings.api_secret_key) or verify_secret(secretKey, settings.admin_secret)):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if client_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid client ID. Must be a positive integer.")
+
+    logger.info(f"API Request: POST /api/ask-ai | client_id={client_id}")
+
+    question = question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+    if len(question) > settings.max_question_length:
+        raise HTTPException(status_code=400, detail=f"Question exceeds maximum length of {settings.max_question_length} characters.")
     current_login_dt = parse_datetime(user_current_login_date, is_end_date=True)
     last_login_dt    = parse_datetime(user_last_login_date, default_offset_hours=_DEFAULT_LAST_LOGIN_HOURS)
 
@@ -101,8 +132,14 @@ async def login_popup_summary(
     user_current_login_date: str = Form(...),
     secretKey: str = Form(...)
 ):
-    if secretKey != "my_secret_123":
+    rate_limiter.check_rate_limit(request, "login_popup_summary", settings.rate_limit_popup_summary)
+    if not (verify_secret(secretKey, settings.api_secret_key) or verify_secret(secretKey, settings.admin_secret)):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if client_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid client ID. Must be a positive integer.")
+
+    logger.info(f"API Request: POST /api/login-popup-summary | client_id={client_id}")
     """
     Dedicated endpoint that accepts Form Data, securely queries the user's real name,
     and returns a pre-formatted HTML AI Summary wrapped in <p> and <strong> tags 
@@ -273,6 +310,7 @@ async def get_logs(lines: int = Query(100, description="Number of tail lines to 
     Returns the most recent log details from the server as plain text.
     """
     try:
+        lines = min(max(1, lines), 1000)
         import os
         log_file = "app.log"
         if not os.path.exists(log_file):
@@ -280,8 +318,8 @@ async def get_logs(lines: int = Query(100, description="Number of tail lines to 
         
         with open(log_file, "r", encoding="utf-8") as f:
             all_lines = f.readlines()
-            tail_lines = all_lines[-lines:] if lines > 0 else all_lines
-        
+
+        tail_lines = all_lines[-lines:] if lines > 0 else all_lines
         return PlainTextResponse("".join(tail_lines))
     except Exception as e:
         logger.error(f"Error reading logs: {e}")
