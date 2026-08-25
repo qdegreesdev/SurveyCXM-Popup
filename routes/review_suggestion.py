@@ -1,3 +1,4 @@
+from typing import Optional
 import json
 import secrets
 from fastapi import APIRouter, HTTPException, Form, Request
@@ -19,7 +20,9 @@ def verify_secret(provided_key: str, expected_key: str) -> bool:
 def get_review_suggestion(
     request: Request,
     secretKey: str = Form(...),
-    survey_summary: str = Form(...)
+    survey_summary: str = Form(...),
+    nps_score: Optional[int] = Form(None),
+    nps: Optional[int] = Form(None)
 ):
     try:
         rate_limiter.check_rate_limit(request, "survey_review_suggestion", settings.rate_limit_review_suggestion)
@@ -56,20 +59,27 @@ def get_review_suggestion(
         if len(survey_data) > settings.max_survey_summary_items:
             raise HTTPException(status_code=400, detail=f"survey_summary list exceeds maximum of {settings.max_survey_summary_items} items")
 
+        # Determine effective NPS score from form parameters
+        effective_nps = nps_score if nps_score is not None else nps
+
         # Validate item structure
         sanitized_summary = []
         for idx, item in enumerate(survey_data):
             if not isinstance(item, dict):
                 raise HTTPException(status_code=400, detail=f"Item at index {idx} must be a JSON object")
             
-            sanitized_summary.append({
+            sanitized_item = {
                 "sequence": item.get("sequence", idx + 1),
                 "question": str(item.get("question", "")).strip()[:500],
                 "answer": str(item.get("answer", "")).strip()[:1000]
-            })
+            }
+            for key in ("nps", "nps_score", "rating", "score"):
+                if key in item:
+                    sanitized_item[key] = item[key]
+            sanitized_summary.append(sanitized_item)
         
-        # Pass the parsed and sanitized data to the service
-        suggestions = generate_review_suggestion(sanitized_summary)
+        # Pass the parsed and sanitized data along with effective NPS to the service
+        suggestions = generate_review_suggestion(sanitized_summary, nps_score=effective_nps)
         return {"suggestions": suggestions}
         
     except json.JSONDecodeError as e:
