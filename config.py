@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     max_question_length: int = 500
     max_survey_summary_items: int = 50
     rate_limit_ask_ai: int = 15
-    rate_limit_popup_summary: int = 30
-    rate_limit_review_suggestion: int = 20
+    rate_limit_popup_summary: int = 5
+    rate_limit_review_suggestion: int = 10
 
     @property
     def cors_origins_list(self) -> list[str]:
