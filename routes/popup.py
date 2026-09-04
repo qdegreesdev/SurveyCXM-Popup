@@ -111,13 +111,14 @@ async def ask_ai(
         if not nps_data:
             return {"answer": "No real time data available to answer your question."}
 
-        demographics, voice = await asyncio.gather(
+        demographics, voice, survey_comparison = await asyncio.gather(
             asyncio.to_thread(db.get_demographic_breakdown_for_surveys, survey_ids, last_login_dt, current_login_dt),
-            asyncio.to_thread(db.get_customer_voice_data_for_surveys, survey_ids, last_login_dt, current_login_dt)
+            asyncio.to_thread(db.get_customer_voice_data_for_surveys, survey_ids, last_login_dt, current_login_dt),
+            asyncio.to_thread(db.get_survey_comparison, survey_ids, last_login_dt, current_login_dt)
         )
         critical_issues = await asyncio.to_thread(aggregate_issues, voice.get("high_severity_records", []))
 
-        answer = await asyncio.to_thread(answer_user_question, nps_data, demographics, critical_issues, question)
+        answer = await asyncio.to_thread(answer_user_question, nps_data, demographics, critical_issues, question, survey_comparison)
         return {"answer": answer}
     except Exception as e:
         logger.error(f"Ask AI endpoint error: {e}")
