@@ -118,6 +118,7 @@ async def ask_ai(
             asyncio.to_thread(db.get_customer_voice_data_for_surveys, survey_ids, last_login_dt, current_login_dt),
             asyncio.to_thread(db.get_survey_comparison, survey_ids, last_login_dt, current_login_dt)
         )
+        critical_issues = await asyncio.to_thread(aggregate_issues, voice.get("high_severity_records", []))
         parsed_chat_history = []
         if chat_history:
             try:
