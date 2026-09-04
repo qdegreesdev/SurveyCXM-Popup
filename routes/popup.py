@@ -22,6 +22,7 @@ from database import get_db_service
 from services.ai_service import generate_ai_summary, answer_user_question
 from services.mock_data import get_mock_popup_data
 from services.tts_service import generate_audio_file
+import json
 import secrets
 from services.popup_service import parse_datetime, aggregate_issues, _DEFAULT_LAST_LOGIN_HOURS
 
@@ -70,7 +71,8 @@ async def ask_ai(
     user_last_login_date: str = Form(...),
     user_current_login_date: str = Form(...),
     question: str = Form(...),
-    secretKey: str = Form(...)
+    secretKey: str = Form(...),
+    chat_history: str = Form(None)
 ):
     rate_limiter.check_rate_limit(request, "ask_ai", settings.rate_limit_ask_ai)
     if not (verify_secret(secretKey, settings.api_secret_key) or verify_secret(secretKey, settings.admin_secret)):
@@ -116,9 +118,17 @@ async def ask_ai(
             asyncio.to_thread(db.get_customer_voice_data_for_surveys, survey_ids, last_login_dt, current_login_dt),
             asyncio.to_thread(db.get_survey_comparison, survey_ids, last_login_dt, current_login_dt)
         )
-        critical_issues = await asyncio.to_thread(aggregate_issues, voice.get("high_severity_records", []))
+        parsed_chat_history = []
+        if chat_history:
+            try:
+                parsed_chat_history = json.loads(chat_history)
+                if not isinstance(parsed_chat_history, list):
+                    parsed_chat_history = []
+            except Exception as parse_err:
+                logger.warning(f"Failed to parse chat_history JSON: {parse_err}")
+                parsed_chat_history = []
 
-        answer = await asyncio.to_thread(answer_user_question, nps_data, demographics, critical_issues, question, survey_comparison)
+        answer = await asyncio.to_thread(answer_user_question, nps_data, demographics, critical_issues, question, survey_comparison, parsed_chat_history)
         return {"answer": answer}
     except Exception as e:
         logger.error(f"Ask AI endpoint error: {e}")

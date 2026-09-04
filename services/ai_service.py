@@ -219,8 +219,8 @@ def _fallback_summary(nps_data: dict, demographics: list, critical_issues: list,
     return {"summary": summary, "key_points": key_points[:5], "critical_vocs": critical_vocs}
 
 
-def answer_user_question(nps_data: dict, demographics: list, critical_issues: list, question: str, survey_comparison: list = None) -> str:
-    """Answers a specific user question using the popup data context with full drill-down detail."""
+def answer_user_question(nps_data: dict, demographics: list, critical_issues: list, question: str, survey_comparison: list = None, chat_history: list = None) -> str:
+    """Answers a specific user question using the popup data context with full drill-down detail and optional chat history memory."""
     if not settings.openai_api_key or settings.openai_api_key.startswith("sk-your"):
         logger.warning("No valid OpenAI API key — using fallback answer.")
         return "I am currently offline."
@@ -304,13 +304,19 @@ CHURN INTENT SIGNALS:
 {chr(10).join([f"- {i['issue']}: {i['critical_count']} churn signals" for i in churn_signals]) or "No explicit churn signals in current period."}
 """
 
+        messages = [{"role": "system", "content": context}]
+
+        if chat_history and isinstance(chat_history, list):
+            for msg in chat_history[-6:]:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    if msg["role"] in ["user", "assistant"]:
+                        messages.append({"role": msg["role"], "content": str(msg["content"])})
+
+        messages.append({"role": "user", "content": question})
 
         response = client.chat.completions.create(
             model=settings.openai_model,
-            messages=[
-                {"role": "system", "content": context},
-                {"role": "user",   "content": question}
-            ],
+            messages=messages,
             temperature=0.3,
             max_tokens=2000,
         )
