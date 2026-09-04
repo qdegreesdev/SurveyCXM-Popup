@@ -219,7 +219,7 @@ def _fallback_summary(nps_data: dict, demographics: list, critical_issues: list,
     return {"summary": summary, "key_points": key_points[:5], "critical_vocs": critical_vocs}
 
 
-def answer_user_question(nps_data: dict, demographics: list, critical_issues: list, question: str) -> str:
+def answer_user_question(nps_data: dict, demographics: list, critical_issues: list, question: str, survey_comparison: list = None) -> str:
     """Answers a specific user question using the popup data context with full drill-down detail."""
     if not settings.openai_api_key or settings.openai_api_key.startswith("sk-your"):
         logger.warning("No valid OpenAI API key — using fallback answer.")
@@ -236,6 +236,14 @@ def answer_user_question(nps_data: dict, demographics: list, critical_issues: li
             f"- {d['name']} ({d['type']}): NPS {d['current_nps']} (was {d.get('previous_nps','?')}, Delta: {d['delta']:+} pts, Responses: {d['responses']}, Trend: {d.get('trend','?')})"
             for d in demographics
         ])
+
+        # Individual survey breakdown (e.g. Customer Experience, Delivery Experience)
+        surveys_str = ""
+        if survey_comparison:
+            surveys_str = chr(10).join([
+                f"- Survey '{s['name']}' (ID {s['survey_id']}): {s['responses']} responses, {s.get('triggers', 0)} triggers/sent, Current NPS: {s['current_nps']} (was {s.get('previous_nps','?')}, Change: {s['delta']:+} pts)"
+                for s in survey_comparison
+            ])
 
         # Issues with verbatim samples and churn counts, including location data
         def format_sample(s):
@@ -254,22 +262,31 @@ def answer_user_question(nps_data: dict, demographics: list, critical_issues: li
         churn_signals = [i for i in critical_issues if i.get("critical_count", 0) > 0]
 
         context = f"""
-You are an intelligent AI analyst for a CX intelligence platform (SurveyCXM).
-You have access to the user's REAL-TIME data from the database for their login window.
-Answer in a detailed drill-down style — like a smart data analyst explaining findings.
-You MUST dynamically format your entire response using standard HTML tags (e.g., <p>, <br>, <strong>, <ul>, <ol>, <li>). Do NOT use Markdown formatting (no asterisks **, no hyphens -).
-Provide clear, concise, and complete answers directly addressing the user's question. 
-When making comparisons, briefly state your methodology, then highlight ONLY the most relevant data points (e.g., the top 1 or 2 regions) rather than listing every single data point. 
-Keep your response focused and readable, avoiding unnecessary length while ensuring the conclusion is well-explained.
-Never say "I don't have data" if the context has relevant info.
-For general/industry questions, combine context data with your broader knowledge.
+You are SurveyCXM AI — a smart, highly accurate CX Chatbot Analyst.
+You have access to the user's REAL-TIME database metrics for their current login window.
 
-PERIOD: Since the user's last login
+BEHAVIOR & RESPONSE GUIDELINES:
+1. GREETINGS: If the user sends casual greetings (e.g., "hyy", "hello", "hi", "hey", "good morning"), respond concisely in a friendly chatbot manner: "<p>Hello! I am your SurveyCXM AI Assistant. How can I help you today?</p>".
+2. STRICT DOMAIN SCOPE (SURVEYCXM ONLY): You are EXCLUSIVELY a SurveyCXM analytics chatbot. You must ONLY answer queries related to SurveyCXM surveys, NPS scores, customer feedback, response/trigger counts, demographic breakdowns, date ranges / time periods, and CX intelligence metrics. Note: Queries asking about the date range, time window, or login period of the data ARE valid SurveyCXM questions; answer them using the TIME WINDOW / DATE PERIOD provided below.
+3. OUT-OF-SCOPE REJECTION: If the user asks ANY question strictly unrelated to SurveyCXM or CX analytics (such as coding scripts, general knowledge trivia, recipes, jokes, weather, sports, or non-CX topics), politely decline with: "<p>I am your SurveyCXM AI Assistant focused exclusively on your SurveyCXM survey data. I cannot assist with topics outside of SurveyCXM.</p>".
+4. MISSING DATA / UNTRACKED ITEMS: If the user asks a valid SurveyCXM question about a specific survey name, location, or metric topic for which NO records exist in the provided data:
+   - State clearly and politely that no specific response or trigger data was recorded for that item in the current period.
+   - Intelligently provide a helpful generic CX insight or summary related to their query using the overall available survey metrics.
+5. ACCURACY & CALCULATIONS: Answer SurveyCXM queries smartly, accurately, and directly using the real-time data provided. If asked about calculations (e.g. NPS formula: NPS = % Promoters - % Detractors), explain clearly using their exact figures.
+6. ROOT CAUSE ANALYSIS: If the user asks WHY NPS dropped or improved (or asks for reasons behind a score change), perform a smart root-cause analysis by correlating the NPS delta with specific customer complaint themes, verbatim feedback samples, and churn signals provided below.
+7. HTML TABLES FOR COMPARISONS: When asked to compare multiple surveys, regions, or cities, format the comparison using a clean, well-structured HTML <table> with <thead>, <tbody>, <tr>, <th>, and <td> tags so tabular comparisons display beautifully in chat.
+8. NO HALLUCINATION: Rely strictly on the real-time metrics provided in the context below. Do not invent fake response numbers or fake verbatims.
+9. CLEAN HTML OUTPUT ONLY: Format your entire response using clean, interactive-ready HTML tags (e.g., <p>, <strong>, <ul>, <li>, <table>). Do NOT use Markdown formatting (no asterisks **, no hash tags #, no markdown dashes -). Keep the style clear, professional, and easy to read in a chat bubble.
+
+TIME WINDOW / DATE PERIOD: {nps_data.get('current_period_label', 'Since last login')}
 
 NPS OVERVIEW:
 - Current NPS    : {nps_data.get('current', 0)} (previous: {nps_data.get('previous', 0)}, change: {'+' if delta >= 0 else ''}{delta} pts — {trend_word})
 - Total Responses: {nps_data.get('total_responses', 0)} (previous period: {nps_data.get('prev_total_responses', 0)})
 - Promoters: {nps_data.get('promoters_pct', 0)}% | Passives: {nps_data.get('passives_pct', 0)}% | Detractors: {nps_data.get('detractors_pct', 0)}%
+
+INDIVIDUAL SURVEY BREAKDOWN:
+{surveys_str or "No individual survey data available."}
 
 TOP IMPROVING AREAS:
 {chr(10).join([f"- {d['name']} ({d['type']}): NPS {d['current_nps']} ({d['delta']:+} pts)" for d in top_gainers]) or "None"}
@@ -286,6 +303,7 @@ CRITICAL CUSTOMER ISSUES (Voice of Customer with verbatim samples):
 CHURN INTENT SIGNALS:
 {chr(10).join([f"- {i['issue']}: {i['critical_count']} churn signals" for i in churn_signals]) or "No explicit churn signals in current period."}
 """
+
 
         response = client.chat.completions.create(
             model=settings.openai_model,

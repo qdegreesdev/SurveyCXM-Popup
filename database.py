@@ -31,6 +31,7 @@ class DatabaseService:
 
     def __init__(self):
         self.engine = None
+        self._tables_cache: set[str] = set()
         self._connect()
 
     # ── Connection management ────────────────────────────────────────────────
@@ -47,9 +48,18 @@ class DatabaseService:
                 pool_recycle=3600
             )
             logger.info(f"✅ MySQL pool created — host={settings.survey_db_host}, db={settings.survey_db_name}")
+            self._refresh_tables_cache()
         except Exception as e:
             logger.error(f"❌ Database pool creation error: {e}")
             self.engine = None
+
+    def _refresh_tables_cache(self) -> None:
+        try:
+            if self.engine is not None:
+                rows = self._execute_query("SHOW TABLES")
+                self._tables_cache = {list(r.values())[0].lower() for r in rows if r}
+        except Exception:
+            pass
 
     def _ensure_connection(self) -> bool:
         if self.engine is None:
@@ -150,6 +160,11 @@ class DatabaseService:
         }
 
     def _check_table_exists(self, table_name: str) -> bool:
+        if not self._tables_cache and self.engine is not None:
+            self._refresh_tables_cache()
+        if self._tables_cache:
+            return table_name.lower() in self._tables_cache
+
         result = self._execute_query(
             """
             SELECT COUNT(*) AS cnt FROM information_schema.tables
@@ -340,6 +355,10 @@ class DatabaseService:
         responses_table = f"survey_responses_{survey_id}"
         nr_table        = f"survey_responses_nr_{survey_id}"
         fh_table        = f"filter_hierarchy_{survey_id}"
+
+        if not (self._check_table_exists(responses_table) and self._check_table_exists(nr_table) and self._check_table_exists(fh_table)):
+            return []
+
         safe_col        = self._safe_slug(nps_slug)
 
         dim_map = {
@@ -436,21 +455,29 @@ class DatabaseService:
         fh_table = f"filter_hierarchy_{survey_id}"
         labels = self._get_filter_labels(survey_id)
 
-        col_rows = self._execute_query(f"SHOW COLUMNS FROM {nr_table}")
-        existing_cols = {row['Field'].lower() for row in col_rows} if col_rows else set()
+        has_nr = self._check_table_exists(nr_table)
+        has_fh = self._check_table_exists(fh_table)
 
-        select_cols = []
-        join_clauses = []
-        for i in range(1, 5):
-            f_col = f"f{i}"
-            if f_col in existing_cols:
-                select_cols.append(f"fh{i}.value AS {f_col}_val")
-                join_clauses.append(f"LEFT JOIN {fh_table} fh{i} ON nr.{f_col} = fh{i}.id AND fh{i}.level = {i}")
-            else:
-                select_cols.append(f"NULL AS {f_col}_val")
+        if has_nr and has_fh:
+            col_rows = self._execute_query(f"SHOW COLUMNS FROM `{nr_table}`")
+            existing_cols = {row['Field'].lower() for row in col_rows} if col_rows else set()
 
-        select_str = ",\n                ".join(select_cols)
-        join_str = "\n            ".join(join_clauses)
+            select_cols = []
+            join_clauses = []
+            for i in range(1, 5):
+                f_col = f"f{i}"
+                if f_col in existing_cols:
+                    select_cols.append(f"fh{i}.value AS {f_col}_val")
+                    join_clauses.append(f"LEFT JOIN `{fh_table}` fh{i} ON nr.{f_col} = fh{i}.id AND fh{i}.level = {i}")
+                else:
+                    select_cols.append(f"NULL AS {f_col}_val")
+
+            select_str = ",\n                ".join(select_cols)
+            join_str = "\n            ".join(join_clauses)
+            from_clause = f"FROM voc_alerts v\n            LEFT JOIN `{nr_table}` nr ON v.survey_res_id = nr.id\n            {join_str}"
+        else:
+            select_str = "NULL AS f1_val,\n                NULL AS f2_val,\n                NULL AS f3_val,\n                NULL AS f4_val"
+            from_clause = "FROM voc_alerts v"
 
         rows = self._execute_query(
             f"""
@@ -464,9 +491,7 @@ class DatabaseService:
                 v.is_critical,
                 v.created_at,
                 {select_str}
-            FROM voc_alerts v
-            LEFT JOIN {nr_table} nr ON v.survey_res_id = nr.id
-            {join_str}
+            {from_clause}
             WHERE v.survey_id = %s
               AND v.sentiment = 'Negative'
               AND v.created_at >= %s
@@ -681,7 +706,20 @@ class DatabaseService:
             prev_nps, _, _, _ = self._calculate_nps(prev_scores)
             
             delta = round(cur_nps - prev_nps, 2)
-            
+
+            triggers = 0
+            nr_table = f"survey_responses_nr_{survey_id}"
+            if self._check_table_exists(nr_table):
+                try:
+                    cnt_rows = self._execute_query(
+                        f"SELECT COUNT(*) AS cnt FROM `{nr_table}` WHERE created_at >= %s AND created_at < %s",
+                        (p["cur_start"], p["cur_end"])
+                    )
+                    if cnt_rows:
+                        triggers = cnt_rows[0].get("cnt", 0) or 0
+                except Exception:
+                    pass
+
             results.append({
                 "survey_id": survey_id,
                 "name": survey_names.get(survey_id, f"Survey #{survey_id}"),
@@ -689,7 +727,8 @@ class DatabaseService:
                 "previous_nps": prev_nps,
                 "delta": delta,
                 "trend": "up" if delta >= 0 else "down",
-                "responses": len(cur_scores)
+                "responses": len(cur_scores),
+                "triggers": triggers
             })
             
         results.sort(key=lambda x: abs(x["delta"]), reverse=True)
@@ -702,6 +741,10 @@ class DatabaseService:
         responses_table = f"survey_responses_{survey_id}"
         nr_table        = f"survey_responses_nr_{survey_id}"
         fh_table        = f"filter_hierarchy_{survey_id}"
+
+        if not (self._check_table_exists(responses_table) and self._check_table_exists(nr_table) and self._check_table_exists(fh_table)):
+            return []
+
         safe_col        = self._safe_slug(nps_slug)
 
         dim_map = {

@@ -18,7 +18,7 @@ def extract_nps_score(survey_summary: list, explicit_nps: Optional[int] = None) 
             continue
 
         # Check direct keys in item dict
-        for key in ("nps", "nps_score", "rating", "score"):
+        for key in ("nps", "nps_score", "rating", "score","NPS"):
             if key in item and item[key] is not None:
                 try:
                     val = int(item[key])
