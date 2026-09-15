@@ -859,6 +859,67 @@ class DatabaseService:
             all_records.extend(voice.get("high_severity_records", []))
         return {"high_severity_records": all_records}
 
+    def save_generated_categories(self, client_id: int, survey_id: int, categories: list[dict]) -> list[dict]:
+        """
+        Pushes generated main categories into master_categories table
+        and sub-categories into model_categories table.
+        Returns the categories enriched with inserted database IDs.
+        """
+        if not self.engine or not categories:
+            return categories
+
+        saved_categories = []
+        try:
+            from sqlalchemy import text
+            with self.engine.begin() as conn:
+                for cat in categories:
+                    cat_name = str(cat.get("category_name", "")).strip()
+                    if not cat_name:
+                        continue
+
+                    # Insert main category into master_categories
+                    insert_main_sql = text("""
+                        INSERT INTO master_categories (name, client_id, survey_id, category_type, is_active, created_at, updated_at)
+                        VALUES (:name, :client_id, :survey_id, 1, 1, NOW(), NOW())
+                    """)
+                    res_main = conn.execute(insert_main_sql, {
+                        "name": cat_name[:100],
+                        "client_id": client_id,
+                        "survey_id": survey_id
+                    })
+                    main_id = res_main.lastrowid
+
+                    saved_sub_cats = []
+                    sub_cats = cat.get("sub_categories", [])
+                    for sub in sub_cats:
+                        sub_name = str(sub).strip() if not isinstance(sub, dict) else str(sub.get("name", "")).strip()
+                        if not sub_name:
+                            continue
+                        
+                        # Insert sub-category into model_categories
+                        insert_sub_sql = text("""
+                            INSERT INTO model_categories (parent_id, name, is_active, created_at, updated_at)
+                            VALUES (:parent_id, :name, 1, NOW(), NOW())
+                        """)
+                        conn.execute(insert_sub_sql, {
+                            "parent_id": main_id,
+                            "name": sub_name[:100]
+                        })
+                        saved_sub_cats.append(sub_name)
+
+                    saved_categories.append({
+                        "category_id": cat.get("category_id"),
+                        "category_name": cat_name,
+                        "sub_categories": saved_sub_cats
+                    })
+            
+            logger.info(f"✅ Successfully saved {len(saved_categories)} main categories into database for client_id={client_id}, survey_id={survey_id}")
+            return saved_categories if saved_categories else categories
+
+        except Exception as e:
+            logger.error(f"❌ Error saving categories to database: {e}")
+            return categories
+
     def close(self) -> None:
         if self.engine:
             try:

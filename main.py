@@ -77,6 +77,9 @@ app.include_router(popup_router, prefix="/api", tags=["Popup Intelligence"])
 from routes.review_suggestion import router as review_suggestion_router
 app.include_router(review_suggestion_router, prefix="/api", tags=["Review Suggestion"])
 
+from routes.category_generator import router as category_generator_router
+app.include_router(category_generator_router, prefix="/api", tags=["Category Generator"])
+
 
 @app.on_event("startup")
 async def startup():
