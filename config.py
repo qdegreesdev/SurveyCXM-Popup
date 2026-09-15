@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     rate_limit_ask_ai: int = 15
     rate_limit_popup_summary: int = 5
     rate_limit_review_suggestion: int = 10
+    rate_limit_category_generation: int = 10
 
     @property
     def cors_origins_list(self) -> list[str]:
