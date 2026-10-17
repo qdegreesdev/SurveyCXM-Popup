@@ -109,15 +109,32 @@ async def ask_ai(
 
     try:
         import asyncio
-        nps_data = await asyncio.to_thread(db.get_nps_data_for_surveys, survey_ids, last_login_dt, current_login_dt)
-        if not nps_data:
-            return {"answer": "No real time data available to answer your question."}
+        from services.rag_service import rag_service
 
-        demographics, voice, survey_comparison = await asyncio.gather(
+        # Concurrently fetch live metrics and relevant documentation
+        nps_data, demographics, voice, survey_comparison, doc_context = await asyncio.gather(
+            asyncio.to_thread(db.get_nps_data_for_surveys, survey_ids, last_login_dt, current_login_dt),
             asyncio.to_thread(db.get_demographic_breakdown_for_surveys, survey_ids, last_login_dt, current_login_dt),
             asyncio.to_thread(db.get_customer_voice_data_for_surveys, survey_ids, last_login_dt, current_login_dt),
-            asyncio.to_thread(db.get_survey_comparison, survey_ids, last_login_dt, current_login_dt)
+            asyncio.to_thread(db.get_survey_comparison, survey_ids, last_login_dt, current_login_dt),
+            asyncio.to_thread(rag_service.search_documentation, question, 3, 0.30)
         )
+
+        if not nps_data:
+            nps_data = {
+                "current": 0,
+                "previous": 0,
+                "delta": 0,
+                "total_responses": 0,
+                "promoters_pct": 0,
+                "passives_pct": 0,
+                "detractors_pct": 0,
+                "current_period_label": f"{last_login_dt.strftime('%d/%m/%Y')} to {current_login_dt.strftime('%d/%m/%Y')}"
+            }
+
+        demographics = demographics or []
+        survey_comparison = survey_comparison or []
+        voice = voice or {}
         critical_issues = await asyncio.to_thread(aggregate_issues, voice.get("high_severity_records", []))
         parsed_chat_history = []
         if chat_history:
@@ -129,7 +146,16 @@ async def ask_ai(
                 logger.warning(f"Failed to parse chat_history JSON: {parse_err}")
                 parsed_chat_history = []
 
-        answer = await asyncio.to_thread(answer_user_question, nps_data, demographics, critical_issues, question, survey_comparison, parsed_chat_history)
+        answer = await asyncio.to_thread(
+            answer_user_question,
+            nps_data,
+            demographics,
+            critical_issues,
+            question,
+            survey_comparison,
+            parsed_chat_history,
+            doc_context
+        )
         return {"answer": answer}
     except Exception as e:
         logger.error(f"Ask AI endpoint error: {e}")
@@ -385,5 +411,19 @@ async def clear_pycache():
     except Exception as e:
         logger.error(f"Error clearing pycache: {e}")
         raise HTTPException(status_code=500, detail="Failed to clear pycache.")
+
+
+@router.post("/sync-documentation", dependencies=[Depends(verify_admin)])
+async def sync_documentation(force: bool = Form(False)):
+    """Admin endpoint to re-index documentation_categories into ChromaDB vector store."""
+    try:
+        import asyncio
+        from services.rag_service import rag_service
+        result = await asyncio.to_thread(rag_service.sync_documentation_index, force=force)
+        return result
+    except Exception as e:
+        logger.error(f"Error syncing documentation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to sync documentation: {e}")
+
 
 

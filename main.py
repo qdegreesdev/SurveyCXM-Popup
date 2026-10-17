@@ -89,6 +89,15 @@ async def startup():
         logger.info("✅ Database pre-warmed successfully")
     else:
         logger.warning("⚠️  Running without DB — mock data mode active")
+
+    # Pre-warm documentation RAG vector index in background
+    try:
+        import asyncio
+        from services.rag_service import rag_service
+        asyncio.create_task(asyncio.to_thread(rag_service.sync_documentation_index))
+        logger.info("📚 Documentation RAG index pre-warming started")
+    except Exception as e:
+        logger.warning(f"Could not pre-warm RAG service: {e}")
     
     # Display the API link in the console so it can be clicked
     logger.info("🌐 API is available at: http://127.0.0.1:8000/")

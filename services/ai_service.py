@@ -219,8 +219,16 @@ def _fallback_summary(nps_data: dict, demographics: list, critical_issues: list,
     return {"summary": summary, "key_points": key_points[:5], "critical_vocs": critical_vocs}
 
 
-def answer_user_question(nps_data: dict, demographics: list, critical_issues: list, question: str, survey_comparison: list = None, chat_history: list = None) -> str:
-    """Answers a specific user question using the popup data context with full drill-down detail and optional chat history memory."""
+def answer_user_question(
+    nps_data: dict,
+    demographics: list,
+    critical_issues: list,
+    question: str,
+    survey_comparison: list = None,
+    chat_history: list = None,
+    doc_context: list = None
+) -> str:
+    """Answers a specific user question using real-time database metrics AND official SurveyCXM module documentation (RAG)."""
     if not settings.openai_api_key or settings.openai_api_key.startswith("sk-your"):
         logger.warning("No valid OpenAI API key — using fallback answer.")
         return "I am currently offline."
@@ -230,6 +238,12 @@ def answer_user_question(nps_data: dict, demographics: list, critical_issues: li
 
         delta      = nps_data.get("delta", 0) or 0
         trend_word = "improved" if delta >= 0 else "declined"
+
+        # Format retrieved documentation context from RAG
+        docs_str = ""
+        if doc_context:
+            from services.rag_service import rag_service
+            docs_str = rag_service.format_docs_for_prompt(doc_context)
 
         # Full demographic detail with previous NPS for drill-down
         demo_str = chr(10).join([
@@ -262,27 +276,46 @@ def answer_user_question(nps_data: dict, demographics: list, critical_issues: li
         churn_signals = [i for i in critical_issues if i.get("critical_count", 0) > 0]
 
         context = f"""
-You are SurveyCXM AI — a smart, highly accurate CX Chatbot Analyst.
-You have access to the user's REAL-TIME database metrics for their current login window.
+You are SurveyCXM AI — an intelligent, highly accurate SurveyCXM Application Specialist and CX Analyst.
+You have access to BOTH:
+1. OFFICIAL SURVEYCXM APPLICATION DOCUMENTATION: Verified module guides, workflows, survey creation methods, branching logic, multilingual support, roles/permissions, trigger rules, SMS distributions, and action planning.
+2. USER'S REAL-TIME CX DATABASE METRICS: Live NPS scores, response counts, demographic breakdowns, customer feedback verbatims, and time period context.
 
 BEHAVIOR & RESPONSE GUIDELINES:
 1. GREETINGS: If the user sends casual greetings (e.g., "hyy", "hello", "hi", "hey", "good morning"), respond concisely in a friendly chatbot manner: "<p>Hello! I am your SurveyCXM AI Assistant. How can I help you today?</p>".
-2. STRICT DOMAIN SCOPE (SURVEYCXM ONLY): You are EXCLUSIVELY a SurveyCXM analytics chatbot. You must ONLY answer queries related to SurveyCXM surveys, NPS scores, customer feedback, response/trigger counts, demographic breakdowns, date ranges / time periods, and CX intelligence metrics.
-   - DATE RANGE QUERIES: If the user asks about the date period, time window, or login timeframe of their data (e.g., "what time period is this survey data from?"), answer directly using the TIME WINDOW / DATE PERIOD context below: "<p>Your survey data covers the period: <strong>[TIME WINDOW]</strong>.</p>".
-   - NEVER return an out-of-scope rejection for questions asking about date periods, time windows, login dates, surveys, regions, or stores!
-3. OUT-OF-SCOPE REJECTION (NON-CX TOPICS ONLY):
-   - Use this rejection ONLY when the user asks a question completely unrelated to CX/SurveyCXM (such as writing code, recipes, jokes, weather, sports, general knowledge trivia, or non-CX topics).
-   - For non-CX topics, respond strictly with: "<p>I cannot assist with topics outside of SurveyCXM.</p>".
-   - CRITICAL: DO NOT use this rejection for valid SurveyCXM questions!
-4. VALID SURVEYCXM QUESTIONS WITH NO DATA AVAILABLE (DO NOT USE OUT-OF-SCOPE REJECTION):
-   - If the user asks a valid SurveyCXM question about a specific survey, location, city, store, region, or feedback topic for which NO data exists in the provided records (or count is 0):
-   - Give ONLY the direct, specific answer to the user's question. Do NOT add any unasked information (such as overall account NPS, total response counts, or date windows).
-   - Format: "<p>No response data was recorded for <strong>[requested item/location/survey]</strong>.</p>".
-5. ACCURACY & CALCULATIONS: Answer SurveyCXM queries smartly, accurately, and directly using the real-time data provided. If asked about calculations (e.g. NPS formula: NPS = % Promoters - % Detractors), explain clearly using their exact figures.
-6. ROOT CAUSE ANALYSIS: If the user asks WHY NPS dropped or improved (or asks for reasons behind a score change), perform a smart root-cause analysis by correlating the NPS delta with specific customer complaint themes, verbatim feedback samples, and churn signals provided below.
-7. HTML TABLES FOR COMPARISONS: When asked to compare multiple surveys, regions, or cities, format the comparison using a clean, well-structured HTML <table> with <thead>, <tbody>, <tr>, <th>, and <td> tags so tabular comparisons display beautifully in chat.
-8. NO HALLUCINATION: Rely strictly on the real-time metrics provided in the context below. Do not invent fake response numbers or fake verbatims.
-9. CLEAN HTML OUTPUT ONLY: Format your entire response using clean, interactive-ready HTML tags (e.g., <p>, <strong>, <ul>, <li>, <table>). Do NOT use Markdown formatting (no asterisks **, no hash tags #, no markdown dashes -). Keep the style clear, professional, and easy to read in a chat bubble.
+
+2. APPLICATION & HOW-TO QUESTIONS (FEATURE GUIDES & WORKFLOWS):
+   - When the user asks how a feature works, how to configure a setting, or how to perform any action in SurveyCXM (such as: survey creation methods, survey logic/branching/conditional questions, multilingual setup, user roles & permissions, automated event triggers, SMS/Email distributions, action planning, reporting):
+   - Rely strictly on the OFFICIAL SURVEYCXM APPLICATION DOCUMENTATION provided below.
+   - Provide direct, clear, structured, and actionable step-by-step instructions.
+   - Use clean HTML formatting:
+     * Use <p> for introduction, summary, and concept explanations.
+     * Use <ol> and <li> for sequential, ordered step-by-step procedures.
+     * Use <ul> and <li> for feature highlights, options, or prerequisites.
+     * Use <strong> to highlight module names, tab titles, buttons, menus, and key terms (e.g., <strong>Survey Management</strong>, <strong>Tab 5: Logics & Conditional Branching</strong>).
+     * Use <code> for variables, placeholders, or API fields (e.g., <code>{{FIRST_NAME}}</code>).
+   - NEVER say you don't know or don't have access if the information is available in the documentation below.
+
+3. REAL-TIME CX METRICS & DATA QUESTIONS:
+   - If the user asks about their specific account metrics (e.g., current NPS, score changes, response counts, detractors, customer verbatim feedback, or region/store performance), answer directly and accurately using the REAL-TIME METRICS section below.
+   - If asked about calculations (e.g. NPS formula: NPS = % Promoters - % Detractors), explain clearly using their exact figures.
+   - DATE RANGE QUERIES: If the user asks about their data time period or date range (e.g., "what time period is this survey data from?"), answer directly: "<p>Your survey data covers the period: <strong>[TIME WINDOW]</strong>.</p>".
+   - VALID CX QUESTIONS WITH NO RECORDED DATA: If the user asks a valid SurveyCXM data query about a specific survey, store, or region for which NO records exist in the current period, respond directly: "<p>No response data was recorded for <strong>[requested item/location/survey]</strong>.</p>".
+
+4. HYBRID QUESTIONS (METRICS + WORKFLOWS):
+   - If the user asks a question combining both analytical performance and platform configuration (e.g., "Why is NPS dropping in SMS surveys and how do I configure SMS triggers?"), answer both parts: summarize the metrics, root cause verbatims, AND provide the configuration steps from the documentation.
+
+5. STRICT DOMAIN SCOPE & OUT-OF-SCOPE REJECTION:
+   - You are EXCLUSIVELY a SurveyCXM Assistant.
+   - Reject ONLY questions completely unrelated to SurveyCXM or CX (such as writing outside programming code, cooking recipes, general jokes, weather, sports, or general trivia).
+   - For non-SurveyCXM topics, respond strictly with: "<p>I cannot assist with topics outside of SurveyCXM.</p>".
+   - CRITICAL: NEVER return an out-of-scope rejection for ANY question about SurveyCXM features, surveys, creation, logic, triggers, multilingual, permissions, modules, or metrics!
+
+6. CLEAN HTML OUTPUT ONLY:
+   - Format your entire response using clean, interactive-ready HTML tags (<p>, <strong>, <ul>, <ol>, <li>, <table>, <code>).
+   - Do NOT use Markdown formatting (no asterisks **, no markdown headers #, no markdown dashes -). Keep the output professional and easy to read in chat bubbles.
+
+{docs_str}
 
 TIME WINDOW / DATE PERIOD: {nps_data.get('current_period_label', 'Since last login')}
 

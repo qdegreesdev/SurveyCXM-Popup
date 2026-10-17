@@ -25,3 +25,5 @@ Thumbs.db
 # Logs and Audio files
 app.log
 static/audio/*.mp3
+data/
+RAG_IMPLEMENTATION_GUIDE.md

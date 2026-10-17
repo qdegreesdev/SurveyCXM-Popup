@@ -920,6 +920,21 @@ class DatabaseService:
             logger.error(f"❌ Error saving categories to database: {e}")
             return categories
 
+    def get_documentation_categories(self, active_only: bool = True) -> list[dict[str, Any]]:
+        """Fetch documentation categories including name, description, and content."""
+        if not self._check_table_exists("documentation_categories"):
+            logger.warning("documentation_categories table does not exist")
+            return []
+        try:
+            sql = "SELECT id, name, description, content, is_active FROM documentation_categories"
+            if active_only:
+                sql += " WHERE is_active = 1"
+            sql += " ORDER BY sort_order ASC, id ASC"
+            return self._execute_query(sql)
+        except Exception as e:
+            logger.error(f"Error fetching documentation categories: {e}")
+            return []
+
     def close(self) -> None:
         if self.engine:
             try:
