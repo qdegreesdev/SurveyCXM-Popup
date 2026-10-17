@@ -11,3 +11,4 @@ pydantic-settings>=2.0.0
 cryptography>=41.0.0
 python-multipart>=0.0.9
 edge-tts>=0.8.0
+chromadb>=1.5.0
