@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 DB_AVAILABLE = False
 _db_service_instance = None
+_db_attempted = False
 
 
 class DatabaseService:
@@ -945,10 +946,13 @@ class DatabaseService:
                 self.engine = None
 
 
+_db_attempted = False
+
 # ── Module-level singleton ────────────────────────────────────────────────────
 def get_db_service() -> DatabaseService | None:
-    global _db_service_instance, DB_AVAILABLE
-    if _db_service_instance is None:
+    global _db_service_instance, DB_AVAILABLE, _db_attempted
+    if _db_service_instance is None and not _db_attempted:
+        _db_attempted = True
         try:
             svc = DatabaseService()
             test = svc.test_connection()
@@ -965,9 +969,10 @@ def get_db_service() -> DatabaseService | None:
 
 def reset_db_service() -> None:
     """Clear the cached database service instance."""
-    global _db_service_instance, DB_AVAILABLE
+    global _db_service_instance, DB_AVAILABLE, _db_attempted
     if _db_service_instance:
         _db_service_instance.close()
     _db_service_instance = None
     DB_AVAILABLE = False
+    _db_attempted = False
     logger.info("Database service cache cleared.")

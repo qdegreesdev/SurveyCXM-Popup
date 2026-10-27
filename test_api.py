@@ -110,5 +110,39 @@ def run_tests():
     else:
         print(f"  [FAILED] Ask-AI Failed! Error: {response_ask.text}")
 
+    print("\n-----------------------------------------")
+    print("Testing /api/doc-rag-search...")
+    form_data_rag = {
+        "question": "How do I create a survey from scratch in SurveyCXM?",
+        "secretKey": "my_secret_123"
+    }
+    start_time_rag = time.time()
+    response_rag = client.post("/api/doc-rag-search", data=form_data_rag)
+    end_time_rag = time.time()
+    latency_rag_ms = (end_time_rag - start_time_rag) * 1000
+    print(f"Doc RAG Search Status: {response_rag.status_code}")
+    print(f"Latency: {latency_rag_ms:.2f} ms")
+    if response_rag.status_code == 200:
+        rag_data = response_rag.json()
+        print("  [SUCCESS] Doc RAG Search Success!")
+        print(f"  Answer Snippet: {rag_data.get('answer', '')[:120]}...")
+    else:
+        print(f"  [FAILED] Doc RAG Search Failed! Error: {response_rag.text}")
+
+    # Test edge case: Greeting
+    print("\nTesting /api/doc-rag-search with Greeting ('hello')...")
+    res_greet = client.post("/api/doc-rag-search", data={"question": "Hello", "secretKey": "my_secret_123"})
+    print(f"  Status: {res_greet.status_code} | Answer: {res_greet.json().get('answer')}")
+
+    # Test edge case: Out-of-Scope (Baking chocolate cake)
+    print("\nTesting /api/doc-rag-search with Out-of-Scope query ('chocolate cake recipe')...")
+    res_scope = client.post("/api/doc-rag-search", data={"question": "Can you give me a recipe for chocolate cake?", "secretKey": "my_secret_123"})
+    print(f"  Status: {res_scope.status_code} | Answer: {res_scope.json().get('answer')}")
+
+    # Test edge case: SurveyCXM query but unindexed/missing data (SAP ERP direct connector)
+    print("\nTesting /api/doc-rag-search with SurveyCXM query lacking documentation...")
+    res_missing = client.post("/api/doc-rag-search", data={"question": "How do I configure SurveyCXM with SAP Ariba directly?", "secretKey": "my_secret_123"})
+    print(f"  Status: {res_missing.status_code} | Answer: {res_missing.json().get('answer')}")
+
 if __name__ == "__main__":
     run_tests()
