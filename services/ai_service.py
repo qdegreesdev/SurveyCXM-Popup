@@ -225,10 +225,9 @@ def answer_user_question(
     critical_issues: list,
     question: str,
     survey_comparison: list = None,
-    chat_history: list = None,
-    doc_context: list = None
+    chat_history: list = None
 ) -> str:
-    """Answers a specific user question using real-time database metrics AND official SurveyCXM module documentation (RAG)."""
+    """Answers a specific user question using real-time database CX metrics."""
     if not settings.openai_api_key or settings.openai_api_key.startswith("sk-your"):
         logger.warning("No valid OpenAI API key — using fallback answer.")
         return "I am currently offline."
@@ -238,12 +237,6 @@ def answer_user_question(
 
         delta      = nps_data.get("delta", 0) or 0
         trend_word = "improved" if delta >= 0 else "declined"
-
-        # Format retrieved documentation context from RAG
-        docs_str = ""
-        if doc_context:
-            from services.rag_service import rag_service
-            docs_str = rag_service.format_docs_for_prompt(doc_context)
 
         # Full demographic detail with previous NPS for drill-down
         demo_str = chr(10).join([
@@ -275,26 +268,21 @@ def answer_user_question(
         top_decliners = sorted([d for d in demographics if d.get("delta", 0) < 0], key=lambda x:  x["delta"])[:3]
         churn_signals = [i for i in critical_issues if i.get("critical_count", 0) > 0]
 
+        role_header = """You are SurveyCXM AI — an intelligent, highly accurate CX Analyst and Performance Intelligence Assistant.
+You have access to:
+USER'S REAL-TIME CX DATABASE METRICS: Live NPS scores, response counts, demographic breakdowns, customer feedback verbatims, survey breakdown, and time period context."""
+
+        app_section = """2. APPLICATION & HOW-TO QUESTIONS (FEATURE GUIDES & WORKFLOWS):
+   - If the user asks how a platform feature or module works (e.g., survey creation methods, branching logic, multilingual setup, user roles, automated event triggers):
+   - Respond cleanly in HTML: "<p>For platform feature guides, please use the Documentation Search assistant (/api/doc-rag-search).</p>"."""
+
         context = f"""
-You are SurveyCXM AI — an intelligent, highly accurate SurveyCXM Application Specialist and CX Analyst.
-You have access to BOTH:
-1. OFFICIAL SURVEYCXM APPLICATION DOCUMENTATION: Verified module guides, workflows, survey creation methods, branching logic, multilingual support, roles/permissions, trigger rules, SMS distributions, and action planning.
-2. USER'S REAL-TIME CX DATABASE METRICS: Live NPS scores, response counts, demographic breakdowns, customer feedback verbatims, and time period context.
+{role_header}
 
 BEHAVIOR & RESPONSE GUIDELINES:
-1. GREETINGS: If the user sends casual greetings (e.g., "hyy", "hello", "hi", "hey", "good morning"), respond concisely in a friendly chatbot manner: "<p>Hello! I am your SurveyCXM AI Assistant. How can I help you today?</p>".
+1. GREETINGS: If the user sends casual greetings (e.g., "hyy", "hello", "hi", "hey", "good morning"), respond concisely in a friendly chatbot manner: "<p>Hello! I am your SurveyCXM AI Assistant. How can I assist you today?</p>".
 
-2. APPLICATION & HOW-TO QUESTIONS (FEATURE GUIDES & WORKFLOWS):
-   - When the user asks how a feature works, how to configure a setting, or how to perform any action in SurveyCXM (such as: survey creation methods, survey logic/branching/conditional questions, multilingual setup, user roles & permissions, automated event triggers, SMS/Email distributions, action planning, reporting):
-   - Rely strictly on the OFFICIAL SURVEYCXM APPLICATION DOCUMENTATION provided below.
-   - Provide direct, clear, structured, and actionable step-by-step instructions.
-   - Use clean HTML formatting:
-     * Use <p> for introduction, summary, and concept explanations.
-     * Use <ol> and <li> for sequential, ordered step-by-step procedures.
-     * Use <ul> and <li> for feature highlights, options, or prerequisites.
-     * Use <strong> to highlight module names, tab titles, buttons, menus, and key terms (e.g., <strong>Survey Management</strong>, <strong>Tab 5: Logics & Conditional Branching</strong>).
-     * Use <code> for variables, placeholders, or API fields (e.g., <code>{{FIRST_NAME}}</code>).
-   - NEVER say you don't know or don't have access if the information is available in the documentation below.
+{app_section}
 
 3. REAL-TIME CX METRICS & DATA QUESTIONS:
    - If the user asks about their specific account metrics (e.g., current NPS, score changes, response counts, detractors, customer verbatim feedback, or region/store performance), answer directly and accurately using the REAL-TIME METRICS section below.
@@ -303,7 +291,7 @@ BEHAVIOR & RESPONSE GUIDELINES:
    - VALID CX QUESTIONS WITH NO RECORDED DATA: If the user asks a valid SurveyCXM data query about a specific survey, store, or region for which NO records exist in the current period, respond directly: "<p>No response data was recorded for <strong>[requested item/location/survey]</strong>.</p>".
 
 4. HYBRID QUESTIONS (METRICS + WORKFLOWS):
-   - If the user asks a question combining both analytical performance and platform configuration (e.g., "Why is NPS dropping in SMS surveys and how do I configure SMS triggers?"), answer both parts: summarize the metrics, root cause verbatims, AND provide the configuration steps from the documentation.
+   - If the user asks a question combining both analytical performance and platform configuration: summarize the live CX metrics, and if documentation is provided, include the configuration steps.
 
 5. STRICT DOMAIN SCOPE & OUT-OF-SCOPE REJECTION:
    - You are EXCLUSIVELY a SurveyCXM Assistant.
@@ -314,8 +302,6 @@ BEHAVIOR & RESPONSE GUIDELINES:
 6. CLEAN HTML OUTPUT ONLY:
    - Format your entire response using clean, interactive-ready HTML tags (<p>, <strong>, <ul>, <ol>, <li>, <table>, <code>).
    - Do NOT use Markdown formatting (no asterisks **, no markdown headers #, no markdown dashes -). Keep the output professional and easy to read in chat bubbles.
-
-{docs_str}
 
 TIME WINDOW / DATE PERIOD: {nps_data.get('current_period_label', 'Since last login')}
 
@@ -365,3 +351,92 @@ CHURN INTENT SIGNALS:
     except Exception as e:
         logger.error(f"Ask AI error: {e}")
         return "An error occurred while processing your question. Please try again later."
+
+
+def answer_rag_question(
+    question: str,
+    doc_context: list = None,
+    chat_history: list = None
+) -> str:
+    """Answers user question using retrieved documentation context (dedicated RAG pipeline)."""
+    if not settings.openai_api_key or settings.openai_api_key.startswith("sk-your"):
+        logger.warning("No valid OpenAI API key — using fallback answer.")
+        return "<p>AI service is currently offline. Please verify API configuration.</p>"
+
+    # 1. Immediate polite greeting response for standalone conversational greetings
+    import re
+    clean_q = question.strip().lower()
+    normalized_q = re.sub(r'[^\w\s]', '', clean_q).strip()
+    if normalized_q in [
+        "hyy", "hello", "hi", "hey", "good morning", "good afternoon",
+        "good evening", "greetings", "who are you", "what can you do", "help"
+    ]:
+        return "<p>Hello! I am your SurveyCXM AI Assistant. How can I assist you today?</p>"
+
+    doc_context = doc_context or []
+
+    try:
+        from services.rag_service import rag_service
+        docs_str = rag_service.format_docs_for_prompt(doc_context)
+
+        context = f"""
+You are SurveyCXM AI — an intelligent, highly accurate SurveyCXM Application Specialist and Documentation Assistant.
+Your primary role is to provide clear, actionable, step-by-step guidance on SurveyCXM features, modules, configurations, survey creation methods, branching logic, multilingual setup, user roles & permissions, automated event triggers, distributions, and workflows.
+
+{docs_str if docs_str else "DOCUMENTATION KNOWLEDGE BASE STATUS: No matching documentation chunks found for this specific query."}
+
+BEHAVIOR & RESPONSE GUIDELINES:
+1. GREETINGS & COURTESY:
+   - If the user opens with a greeting or asks who you are:
+   - Respond concisely in a friendly chatbot manner: "<p>Hello! I am your SurveyCXM AI Assistant. How can I assist you today?</p>".
+
+2. STRICT DOMAIN SCOPE & OUT-OF-SCOPE REJECTION:
+   - You are EXCLUSIVELY a SurveyCXM Assistant.
+   - If the query is completely unrelated to SurveyCXM or Customer Experience (such as general knowledge, cooking recipes, jokes, weather, sports, movies, outside programming languages, trivia, etc.):
+   - You MUST respond strictly with: "<p>I cannot assist with topics outside of SurveyCXM.</p>".
+
+3. SURVEYCXM QUERIES WITH NO RECORDED DOCUMENTATION:
+   - If the user asks a valid question related to SurveyCXM (such as surveys, feedback, logic, triggers, modules, reports, settings, integrations) but the specific details or feature are NOT covered in the documentation above:
+   - Do NOT invent procedures, fake URLs, or hallucinate settings.
+   - Respond clearly in HTML: "<p>No documentation found for this feature. Please contact your administrator.</p>".
+
+4. APPLICATION & HOW-TO QUESTIONS (FEATURE GUIDES & WORKFLOWS):
+   - When the documentation is available in the references above:
+   - Provide direct, clear, structured, and actionable step-by-step instructions.
+   - Use clean HTML formatting:
+     * Use <p> for introductory text, summaries, and concept explanations.
+     * Use <ol> and <li> for sequential, ordered step-by-step procedures.
+     * Use <ul> and <li> for feature highlights, options, bulleted lists, or prerequisites.
+     * Use <strong> to highlight module names, tab titles, buttons, menus, and key terms (e.g., <strong>Survey Management</strong>, <strong>Tab 5: Logics & Conditional Branching</strong>).
+     * Use <code> for variables, placeholders, or API fields (e.g., <code>{{FIRST_NAME}}</code>).
+   - NEVER say you don't know or don't have access if the information is present in the documentation above.
+
+5. CLEAN HTML OUTPUT ONLY:
+   - Format your entire response using clean, interactive-ready HTML tags (<p>, <strong>, <ul>, <ol>, <li>, <table>, <code>).
+   - Do NOT use Markdown formatting (no asterisks **, no markdown headers #, no markdown dashes -). Keep the output professional and easy to read in chat bubbles.
+"""
+
+        client = OpenAI(api_key=settings.openai_api_key)
+        messages = [{"role": "system", "content": context}]
+
+        if chat_history and isinstance(chat_history, list):
+            for msg in chat_history[-6:]:
+                if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                    if msg["role"] in ["user", "assistant"]:
+                        messages.append({"role": msg["role"], "content": str(msg["content"])})
+
+        messages.append({"role": "user", "content": question})
+
+        response = client.chat.completions.create(
+            model=settings.openai_model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=2000,
+        )
+
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        logger.error(f"Doc RAG question error: {e}")
+        return "<p>An error occurred while processing your question. Please try again later.</p>"
+

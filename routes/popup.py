@@ -7,11 +7,10 @@ DATE LOGIC:
   - previous_period : equal window before last_login  (for comparison)
   - All W1/W2 week concepts removed.
 """
-from datetime import datetime, timedelta
-
-from pydantic import BaseModel
+from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Form, BackgroundTasks, Request, Depends, Header
-from fastapi.responses import PlainTextResponse, FileResponse, Response
+from fastapi.responses import PlainTextResponse, FileResponse
 import os
 import uuid
 from loguru import logger
@@ -70,9 +69,9 @@ async def ask_ai(
     client_id: int = Form(...),
     user_last_login_date: str = Form(...),
     user_current_login_date: str = Form(...),
-    question: str = Form(...),
-    secretKey: str = Form(...),
-    chat_history: str = Form(None)
+    question: str = Form(..., description="User question about CX metrics"),
+    secretKey: str = Form(..., description="API secret key or admin secret"),
+    chat_history: Optional[str] = Form(None, description="Optional JSON array of previous chat messages")
 ):
     rate_limiter.check_rate_limit(request, "ask_ai", settings.rate_limit_ask_ai)
     if not (verify_secret(secretKey, settings.api_secret_key) or verify_secret(secretKey, settings.admin_secret)):
@@ -83,42 +82,48 @@ async def ask_ai(
 
     logger.info(f"API Request: POST /api/ask-ai | client_id={client_id}")
 
-    question = question.strip()
-    if not question:
+    clean_question = (question or "").strip()
+    if not clean_question:
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
-    if len(question) > settings.max_question_length:
+    if len(clean_question) > settings.max_question_length:
         raise HTTPException(status_code=400, detail=f"Question exceeds maximum length of {settings.max_question_length} characters.")
+    question = clean_question
     current_login_dt = parse_datetime(user_current_login_date, is_end_date=True)
     last_login_dt    = parse_datetime(user_last_login_date, default_offset_hours=_DEFAULT_LAST_LOGIN_HOURS)
 
     if last_login_dt > current_login_dt:
         raise HTTPException(status_code=400, detail="Last login date cannot be in the future relative to the current login date.")
 
-    db = get_db_service()
-    survey_ids = []
-    if db and database.DB_AVAILABLE and not settings.use_mock_data:
-        client_info = db.get_client_by_id(client_id)
-        if not client_info:
-            return {"answer": "Invalid client ID or client is inactive."}
-        survey_ids = db.get_survey_ids_by_client(client_id)
-        if not survey_ids:
-            return {"answer": "No active surveys found for this client."}
-
-    if not database.DB_AVAILABLE or settings.use_mock_data or db is None:
+    if settings.use_mock_data:
         return {"answer": "Database is unavailable. Cannot answer questions without real time data."}
+
+    db = get_db_service()
+    if not database.DB_AVAILABLE or db is None:
+        return {"answer": "Database is unavailable. Cannot answer questions without real time data."}
+
+    client_info = db.get_client_by_id(client_id)
+    if not client_info:
+        return {"answer": "Invalid client ID or client is inactive."}
+    survey_ids = db.get_survey_ids_by_client(client_id) or []
+    if not survey_ids:
+        return {"answer": "No active surveys found for this client."}
 
     try:
         import asyncio
-        from services.rag_service import rag_service
 
-        # Concurrently fetch live metrics and relevant documentation
-        nps_data, demographics, voice, survey_comparison, doc_context = await asyncio.gather(
+        # Concurrently fetch live metrics with error isolation
+        results = await asyncio.gather(
             asyncio.to_thread(db.get_nps_data_for_surveys, survey_ids, last_login_dt, current_login_dt),
             asyncio.to_thread(db.get_demographic_breakdown_for_surveys, survey_ids, last_login_dt, current_login_dt),
             asyncio.to_thread(db.get_customer_voice_data_for_surveys, survey_ids, last_login_dt, current_login_dt),
             asyncio.to_thread(db.get_survey_comparison, survey_ids, last_login_dt, current_login_dt),
-            asyncio.to_thread(rag_service.search_documentation, question, 3, 0.30)
+            return_exceptions=True
         )
+
+        nps_data = results[0] if not isinstance(results[0], Exception) else {}
+        demographics = results[1] if not isinstance(results[1], Exception) else []
+        voice = results[2] if not isinstance(results[2], Exception) else {}
+        survey_comparison = results[3] if not isinstance(results[3], Exception) else []
 
         if not nps_data:
             nps_data = {
@@ -153,13 +158,13 @@ async def ask_ai(
             critical_issues,
             question,
             survey_comparison,
-            parsed_chat_history,
-            doc_context
+            parsed_chat_history
         )
         return {"answer": answer}
     except Exception as e:
         logger.error(f"Ask AI endpoint error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error generating AI response.")
+
 
 @router.post("/login-popup-summary")
 async def login_popup_summary(
@@ -322,10 +327,24 @@ async def login_popup_summary(
 
 @router.get("/health")
 async def health():
+    """
+    Health check endpoint returning both database and RAG vector store health status.
+    """
     db = get_db_service()
-    if db:
-        return db.test_connection()
-    return {"connected": False, "error": "DB service not initialized"}
+    db_health = db.test_connection() if db else {"connected": False, "error": "DB service not initialized"}
+    
+    from services.rag_service import rag_service
+    rag_health = rag_service.test_health()
+    
+    is_db_connected = db_health.get("connected", False)
+    is_rag_healthy = rag_health.get("status") == "healthy"
+    
+    return {
+        "status": "healthy" if (is_db_connected and is_rag_healthy) else "degraded",
+        "connected": is_db_connected,
+        "database": db_health,
+        "rag": rag_health
+    }
 
 @router.post("/clear-cache", dependencies=[Depends(verify_admin)])
 async def clear_cache():
@@ -346,19 +365,21 @@ async def clear_cache():
 async def get_logs(lines: int = Query(100, description="Number of tail lines to return")):
     """
     Returns the most recent log details from the server as plain text.
+    Protected by admin authorization header (x-admin-secret).
     """
     try:
+        from collections import deque
         lines = min(max(1, lines), 1000)
-        import os
-        log_file = "app.log"
-        if not os.path.exists(log_file):
-            return PlainTextResponse("Log file not found or empty.")
+        project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        log_file = os.path.join(project_dir, "app.log")
         
-        with open(log_file, "r", encoding="utf-8") as f:
-            all_lines = f.readlines()
+        if not os.path.exists(log_file):
+            return PlainTextResponse("Log file not found or empty.", media_type="text/plain; charset=utf-8")
+        
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            tail_lines = list(deque(f, maxlen=lines))
 
-        tail_lines = all_lines[-lines:] if lines > 0 else all_lines
-        return PlainTextResponse("".join(tail_lines))
+        return PlainTextResponse("".join(tail_lines), media_type="text/plain; charset=utf-8")
     except Exception as e:
         logger.error(f"Error reading logs: {e}")
         raise HTTPException(status_code=500, detail="Failed to read logs.")
@@ -368,8 +389,8 @@ async def get_logs(lines: int = Query(100, description="Number of tail lines to 
 async def clear_logs():
     """Clears the app.log file and outputs a clear sequence to the terminal."""
     try:
-        import os
-        log_file = "app.log"
+        project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        log_file = os.path.join(project_dir, "app.log")
         if os.path.exists(log_file):
             with open(log_file, "w", encoding="utf-8") as f:
                 f.truncate(0)
@@ -383,47 +404,49 @@ async def clear_logs():
 
 @router.post("/clear-pycache", dependencies=[Depends(verify_admin)])
 async def clear_pycache():
-    """Removes all __pycache__ directories and .pyc files recursively."""
+    """Removes project __pycache__ directories and .pyc files recursively (excluding venv and .git)."""
     try:
-        import os
         import shutil
-        import glob
         
         project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        exclude_dirs = {"venv", ".venv", "env", ".git", ".idea", ".vscode", "data", "static", "node_modules"}
         
-        # Recursively find and remove __pycache__ directories
-        pycache_dirs = glob.glob(os.path.join(project_dir, '**', '__pycache__'), recursive=True)
-        for d in pycache_dirs:
-            try:
-                shutil.rmtree(d)
-            except Exception:
-                pass
+        cleared_dirs = 0
+        cleared_files = 0
+        
+        for root, dirs, files in os.walk(project_dir, topdown=True):
+            # Exclude virtual environments and git dirs from traversal
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+            
+            # Remove __pycache__ folders
+            for d in list(dirs):
+                if d == "__pycache__":
+                    cache_path = os.path.join(root, d)
+                    try:
+                        shutil.rmtree(cache_path)
+                        cleared_dirs += 1
+                        dirs.remove(d)
+                    except Exception as err:
+                        logger.warning(f"Could not delete {cache_path}: {err}")
+            
+            # Remove orphan .pyc or .pyo files
+            for f in files:
+                if f.endswith((".pyc", ".pyo")):
+                    file_path = os.path.join(root, f)
+                    try:
+                        os.remove(file_path)
+                        cleared_files += 1
+                    except Exception as err:
+                        logger.warning(f"Could not delete {file_path}: {err}")
                 
-        # Recursively find and remove individual .pyc files
-        pyc_files = glob.glob(os.path.join(project_dir, '**', '*.pyc'), recursive=True)
-        for f in pyc_files:
-            try:
-                os.remove(f)
-            except Exception:
-                pass
-                
-        return {"status": "success", "message": f"Cleared {len(pycache_dirs)} __pycache__ dirs and {len(pyc_files)} .pyc files."}
+        return {
+            "status": "success",
+            "message": f"Cleared {cleared_dirs} project __pycache__ directories and {cleared_files} bytecode files."
+        }
     except Exception as e:
         logger.error(f"Error clearing pycache: {e}")
         raise HTTPException(status_code=500, detail="Failed to clear pycache.")
 
-
-@router.post("/sync-documentation", dependencies=[Depends(verify_admin)])
-async def sync_documentation(force: bool = Form(False)):
-    """Admin endpoint to re-index documentation_categories into ChromaDB vector store."""
-    try:
-        import asyncio
-        from services.rag_service import rag_service
-        result = await asyncio.to_thread(rag_service.sync_documentation_index, force=force)
-        return result
-    except Exception as e:
-        logger.error(f"Error syncing documentation: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to sync documentation: {e}")
 
 
 

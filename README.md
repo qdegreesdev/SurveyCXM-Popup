@@ -7,49 +7,42 @@ A full-stack AI-powered login popup system that greets users with a **personaliz
 ## 📁 Project Structure
 
 ```
-New_popup/
-├── backend/                  # FastAPI Python backend
-│   ├── main.py               # App entrypoint, CORS, startup hooks
-│   ├── config.py             # Settings from .env (DB, OpenAI, flags)
-│   ├── database.py           # MySQL connection + all query methods
-│   ├── requirements.txt      # Python dependencies
-│   ├── .env                  # Environment variables (secrets)
-│   ├── routes/
-│   │   └── popup.py          # All API endpoints
-│   └── services/
-│       ├── ai_service.py     # OpenAI summary + Ask AI logic
-│       ├── mock_data.py      # Fallback data when DB is unavailable
-│       ├── nps_service.py    # NPS calculation helpers
-│       ├── demographic_service.py  # Region/State/City breakdown
-│       └── freetext_service.py     # Voice-of-customer text parsing
-│
-├── frontend/                 # React + Vite frontend
-│   └── src/
-│       ├── App.jsx           # Main app with config form
-│       └── components/
-│           ├── PopupModal.jsx        # Main modal container with tabs
-│           ├── AISummaryCard.jsx     # AI summary + Ask AI feature
-│           ├── NPSScoreCard.jsx      # NPS score display
-│           ├── DemographicBreakdown.jsx  # Region/State/City NPS
-│           ├── CriticalIssues.jsx    # Voice of Customer alerts
-│           ├── SurveyComparison.jsx  # Survey-level NPS comparison
-│           └── LoadingSkeleton.jsx   # Loading state UI
-│
-└── test_api.py               # API test runner script
+SurveyCXM_AI_Popup/
+├── main.py                   # FastAPI app entrypoint, CORS, startup hooks
+├── config.py                 # Settings from .env (DB, OpenAI, rate limits)
+├── database.py               # MySQL connection + analytical query methods
+├── requirements.txt          # Python dependencies
+├── .env                      # Environment configuration
+├── routes/
+│   ├── popup.py              # Login summary & Ask-AI CX analytics endpoints
+│   ├── rag.py                # Documentation RAG search & sync endpoints
+│   ├── category_generator.py # Industry category & subcategory endpoints
+│   └── review_suggestion.py  # AI review suggestion endpoints
+├── services/
+│   ├── ai_service.py         # OpenAI summary, CX metrics & RAG Q&A logic
+│   ├── rag_service.py        # ChromaDB vector indexer & semantic search
+│   ├── popup_service.py      # Date parsing & issue aggregation
+│   ├── mock_data.py          # Fallback data when DB is unavailable
+│   ├── demographic_service.py # Region/State/City breakdown
+│   ├── freetext_service.py   # Voice-of-customer text parsing
+│   ├── rate_limiter.py       # In-memory sliding window IP rate limiter
+│   └── tts_service.py        # Text-to-speech audio synthesis
+├── test_api.py               # Integration test runner
+├── test_security.py          # Security, auth, and rate limit test suite
+├── test_rag_eval.py          # DeepEval RAG retrieval & faithfulness evaluation
+└── test_comprehensive_edge_cases.py # 23-test logic, guardrail & edge-case test suite
 ```
 
 ---
 
 ## ⚙️ Environment Setup
 
-### 1. Backend — Python Virtual Environment
+### 1. Python Virtual Environment
 
-Navigate to the backend folder and set up a virtual environment:
+Set up and activate your virtual environment:
 
 ```powershell
-cd backend
-
-# Create virtual environment
+# Create virtual environment (first time only)
 python -m venv venv
 
 # Activate it (Windows PowerShell)
@@ -61,12 +54,12 @@ pip install -r requirements.txt
 
 ### 2. Configure `.env` File
 
-Edit `backend/.env` with your credentials:
+Ensure `.env` contains your credentials:
 
 ```env
-# OpenAI (required for AI Summary and Ask AI)
+# OpenAI
 OPENAI_API_KEY=sk-proj-your-key-here
-OPENAI_MODEL=gpt-3.5-turbo
+OPENAI_MODEL=gpt-4o-mini
 
 # MySQL Database
 SURVEY_DB_HOST=your-db-host
@@ -75,8 +68,9 @@ SURVEY_DB_NAME=surveycx_demo
 SURVEY_DB_USER=your-db-user
 SURVEY_DB_PASSWORD=your-db-password
 
-# Set to true to force mock/demo data (useful for testing without DB)
-USE_MOCK_DATA=false
+# Security & Secrets
+API_SECRET_KEY=my_secret_123
+ADMIN_SECRET=your_admin_secret
 ```
 
 ### 3. Start the Backend Server
@@ -91,21 +85,8 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 The server will:
 - Start on `http://127.0.0.1:8000`
-- **Automatically open** your browser to `http://127.0.0.1:8000/docs` (Swagger UI)
-- Pre-warm the database connection on startup
-- Log `✅ Database pre-warmed` or `⚠️ Running without DB — mock data mode active`
-
-### 4. Start the Frontend
-
-Open a **second terminal** and run:
-
-```powershell
-cd frontend
-npm install       # first time only
-npm run dev
-```
-
-Frontend runs at `http://localhost:5173`
+- Serve interactive API documentation at `http://127.0.0.1:8000/docs`
+- Pre-warm the database connection and documentation vector store on startup
 
 ---
 
@@ -206,9 +187,58 @@ Invoke-RestMethod -Uri "http://localhost:8000/api/ask-ai" -Method Post -Body $bo
 
 ---
 
+### `POST /api/doc-rag-search`
+
+**Dedicated Documentation Vector Search & Grounded Q&A Endpoint.**  
+Performs dense semantic vector search against indexed official SurveyCXM module documentation and generates step-by-step guidance formatted in clean HTML.
+
+* **Content-Type:** `application/x-www-form-urlencoded`
+* **Rate Limit:** 15 requests/minute per IP (`rate_limit_doc_rag_search`)
+
+**Form Data Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `question` | string | ✅ | Free-text question about SurveyCXM features, setups, or workflows |
+| `secretKey` | string | ✅ | API secret key or admin secret |
+| `chat_history` | string (JSON) | ❌ | Optional JSON array of previous chat messages |
+
+**Example Request (cURL):**
+```bash
+curl -X POST http://localhost:8000/api/doc-rag-search \
+  -d "question=How do I create a new survey from scratch?&secretKey=my_secret_123"
+```
+
+**Response:**
+```json
+{
+  "answer": "<p>To create a new survey in <strong>SurveyCXM</strong>, follow these steps:</p><ol><li>Navigate to <strong>Build Survey</strong> from the left navigation menu.</li><li>Click <strong>+ New Survey</strong> in the top-right corner...</li></ol>"
+}
+```
+
+---
+
+### `POST /api/sync-documentation`
+
+**Admin endpoint to synchronize and re-index the documentation vector store.**  
+Reads active categories from `documentation_categories` table in MySQL and updates ChromaDB.
+
+* **Content-Type:** `application/x-www-form-urlencoded`
+* **Headers:** `x-admin-secret: <ADMIN_SECRET>` (required)
+* **Parameters:** `force` (boolean, optional, default `false`)
+
+**Example Request (cURL):**
+```bash
+curl -X POST http://localhost:8000/api/sync-documentation \
+  -H "x-admin-secret: your_admin_secret" \
+  -d "force=true"
+```
+
+---
+
 ### `GET /api/health`
 
-Health check — verifies the database connection is alive.
+Health check — verifies that both the MySQL database and the ChromaDB RAG documentation vector store are initialized and operational.
 
 ```
 GET http://localhost:8000/api/health
@@ -216,7 +246,52 @@ GET http://localhost:8000/api/health
 
 **Response:**
 ```json
-{ "connected": true, "db": "surveycx_demo", "host": "188.241.187.49" }
+{
+  "status": "healthy",
+  "connected": true,
+  "database": {
+    "connected": true,
+    "database": "surveycx_dev",
+    "host": "188.241.187.49"
+  },
+  "rag": {
+    "status": "healthy",
+    "initialized": true,
+    "collection": "surveycxm_documentation",
+    "total_chunks": 79,
+    "categories_count": 6
+  }
+}
+```
+
+---
+
+### `GET /api/logs`
+
+Returns the most recent tail of application log entries as plain text. Protected by admin secret header.
+
+* **Headers:** `x-admin-secret: <ADMIN_SECRET>` (required)
+* **Query Parameters:** `lines` (integer, optional, default `100`, max `1000`)
+* **Response Content-Type:** `text/plain; charset=utf-8`
+
+**Example Request (cURL):**
+```bash
+curl http://localhost:8000/api/logs?lines=50 \
+  -H "x-admin-secret: your_admin_secret"
+```
+
+---
+
+### `POST /api/clear-logs`
+
+Empties the `app.log` file on the server and sends a clear-screen terminal signal.
+
+* **Headers:** `x-admin-secret: <ADMIN_SECRET>` (required)
+
+**Example Request (cURL):**
+```bash
+curl -X POST http://localhost:8000/api/clear-logs \
+  -H "x-admin-secret: your_admin_secret"
 ```
 
 ---
@@ -290,22 +365,21 @@ The system is designed to **never crash the frontend**:
 
 ## 🧪 Running Tests
 
-A test script is included at the project root:
+The repository includes comprehensive automated test suites covering unit logic, edge cases, security guardrails, rate limiting, and DeepEval RAG evaluations:
 
 ```powershell
-# Activate virtual environment first
-cd backend
-.\venv\Scripts\activate
-cd ..
+# 1. Run Complete Logic & Edge-Case Unit Suite (22 Tests)
+python test_comprehensive_edge_cases.py
 
-# Run all API tests
+# 2. Run Security, Authentication & Sliding-Window Rate Limit Tests (20 Tests)
+python -m pytest test_security.py
+
+# 3. Run DeepEval RAG Faithfulness & Relevancy Benchmarks
+python test_rag_eval.py
+
+# 4. Run Live API Integration Tests
 python test_api.py
 ```
-
-**Tests covered:**
-1. `GET /api/popup-data` — popup data dynamic check
-2. `POST /api/login-popup-summary` — greeting + HTML summary
-3. `POST /api/ask-ai` — free-text question answering
 
 ---
 
@@ -377,9 +451,8 @@ These 5 questions are pre-tested and give excellent detailed answers:
 
 ### `Could not import module "main"` on uvicorn start
 **Cause:** You are running uvicorn from the wrong directory.  
-**Fix:** Always run from inside the `backend/` folder:
+**Fix:** Always run from the project root directory:
 ```powershell
-cd backend
 python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -408,28 +481,22 @@ OPENAI_API_KEY=sk-proj-...your-key...
 
 ---
 
-## 📦 Dependencies
+## 📦 Dependencies (`requirements.txt`)
 
-### Backend (`requirements.txt`)
 | Package | Purpose |
 |---------|---------|
-| `fastapi` | Web framework for the API |
+| `fastapi` | High-performance async web framework |
 | `uvicorn` | ASGI server to run FastAPI |
-| `python-multipart` | Parses Form Data in POST requests |
+| `python-multipart` | Form Data parser for POST endpoints |
 | `pymysql` | MySQL database driver |
-| `sqlalchemy` | ORM and query builder |
-| `openai` | OpenAI GPT API client |
-| `pydantic-settings` | Config management from `.env` |
-| `python-dotenv` | Loads `.env` file |
-| `loguru` | Structured logging |
-| `pandas` | Data aggregation helpers |
-| `cryptography` | Secure DB connection |
-
-### Frontend
-| Package | Purpose |
-|---------|---------|
-| `react` | UI framework |
-| `vite` | Dev server and bundler |
+| `sqlalchemy` | Connection pooling and query management |
+| `openai` | OpenAI GPT API client (`gpt-4o-mini`) |
+| `chromadb` | Embedded semantic vector store (`all-MiniLM-L6-v2`) |
+| `pydantic-settings` | Strongly-typed environment configuration |
+| `python-dotenv` | Automatically loads variables from `.env` |
+| `loguru` | Structured logging with automatic file rotation |
+| `deepeval` | Automated LLM evaluation framework |
+| `pytest` | Security and unit testing suite |
 
 ---
 
@@ -439,3 +506,46 @@ OPENAI_API_KEY=sk-proj-...your-key...
 - The greeting (`Good morning/afternoon/evening`) is based on the **actual server time at the moment of the API call**, not the dates you pass in
 - The `is_mock` field in `/api/popup-data` response tells you if real or fallback data is being returned
 - Hot-reload is enabled by default — any change to `.py` files will automatically restart the server
+
+---
+
+## 🛡️ Architecture Hardening & Concurrency Guardrails
+
+The RAG and analytics pipelines include dedicated production-grade safeguards:
+
+1. **Decoupled Architecture (`routes/rag.py` & `routes/popup.py`)**:
+   - `/api/ask-ai` executes solely against real-time MySQL CX analytics (~230ms latency) without vector search overhead.
+   - Platform feature and how-to queries are handled by `/api/doc-rag-search` with semantic ChromaDB vector retrieval.
+2. **Concurrency & Thread Safety**:
+   - `DocRAGService` uses `threading.RLock()` and an `_is_syncing` atomic flag to prevent SQLite lockups (`sqlite3.OperationalError`) during background re-indexing or simultaneous client queries.
+3. **Database Timeout Protection**:
+   - Database service initialization implements a singleton latch (`_db_attempted`) to prevent repeated 15-second network socket timeout lockups when remote MySQL nodes are unreachable.
+4. **Hierarchical HTML Chunking**:
+   - Splits category documentation along `<h1>` through `<h4>` headers while capturing introductory module overviews.
+   - Automatically sub-chunks oversized bulleted lists (>3,500 characters) into semantic ~2,200 character units.
+5. **Calibrated Similarity Thresholding**:
+   - Cosine similarity cutoff calibrated to $\ge 0.42$ using `all-MiniLM-L6-v2` 384-dimensional embeddings, preventing false-positive injections on unrelated questions.
+6. **Strict Input Validation & HTTP Standards**:
+   - Rejects empty questions or overlong questions (>500 characters) with `HTTP 400 Bad Request`.
+   - Rejects unauthorized or missing credentials with `HTTP 401 Unauthorized`.
+   - Enforces per-IP sliding-window rate limiting with `HTTP 429 Too Many Requests`.
+
+---
+
+## 🧪 DeepEval Automated LLM & RAG Testing
+
+We use [DeepEval](https://github.com/confident-ai/deepeval) to evaluate and benchmark the quality of our RAG documentation retrieval and LLM response generation:
+
+### Tested Evaluation Dimensions:
+1. **Answer Relevancy**: Assesses whether generated responses directly answer the user prompt in clean HTML.
+2. **Faithfulness**: Measures whether responses are fully grounded in retrieved module documentation without hallucination.
+3. **Domain Scope Guardrails (GEval)**: Validates that queries unrelated to SurveyCXM or CX are strictly rejected.
+
+### Running DeepEval Tests:
+```bash
+# Standalone execution
+python test_rag_eval.py
+
+# Or via DeepEval / Pytest CLI
+deepeval test run test_rag_eval.py
+```

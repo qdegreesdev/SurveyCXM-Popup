@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     max_question_length: int = 500
     max_survey_summary_items: int = 50
     rate_limit_ask_ai: int = 15
+    rate_limit_doc_rag_search: int = 15
     rate_limit_popup_summary: int = 5
     rate_limit_review_suggestion: int = 10
     rate_limit_category_generation: int = 10

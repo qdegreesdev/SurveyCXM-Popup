@@ -6,7 +6,6 @@ ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import logging
 import secrets
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -73,6 +72,9 @@ app.add_middleware(
 )
 
 app.include_router(popup_router, prefix="/api", tags=["Popup Intelligence"])
+
+from routes.rag import router as rag_router
+app.include_router(rag_router, prefix="/api", tags=["Documentation RAG"])
 
 from routes.review_suggestion import router as review_suggestion_router
 app.include_router(review_suggestion_router, prefix="/api", tags=["Review Suggestion"])
