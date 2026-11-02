@@ -26,7 +26,7 @@ from services.ai_service import answer_rag_question
 from services.cache_service import cache_service
 from services.session_service import session_service
 import re
-from services.query_rewriter import rewrite_query_async, clean_and_parse_chat_history, is_conversational_query
+from services.query_rewriter import rewrite_query_async, clean_and_parse_chat_history, is_conversational_query, get_greeting_or_courtesy_response, is_greeting_or_courtesy
 from services.observability_service import observability_service, TraceRecord
 
 router = APIRouter()
@@ -73,6 +73,15 @@ async def doc_rag_search(
     logger.info(f"API Request: POST /api/doc-rag-search | question='{question[:60]}...'")
 
     session_key = session_service.resolve_session_key(request)
+
+    # Fast-path for greetings & pleasantries (< 1 ms latency, bypasses vector search and rewriting)
+    fast_greeting = get_greeting_or_courtesy_response(question)
+    if fast_greeting:
+        session_service.add_turn(session_key, question, fast_greeting)
+        return {
+            "answer": fast_greeting,
+            "cached": False
+        }
 
     # 1. Automatic Server-Side Session Memory
     parsed_chat_history = session_service.get_history(session_key)

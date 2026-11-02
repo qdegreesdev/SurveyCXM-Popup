@@ -24,10 +24,43 @@ from typing import Any
 CONVERSATIONAL_TRIGGERS = re.compile(
     r'\b(it|this|that|them|these|those|they|its|previous|above|former|latter|'
     r'again|first one|second one|third one|why|how to enable|how to setup|'
-    r'how to configure|explain more|tell me more|more details|my name|who am i|'
-    r'remember me|what is my)\b',
+    r'how to configure|explain more|tell me more|more details)\b',
     re.IGNORECASE
 )
+
+GREETINGS_REGEX = re.compile(
+    r'^(hyy+|hy+|hi+|hello+|hey+|heyy+|heyyy+|hola|namaste|good\s+(morning|afternoon|evening|day)|greetings|sup|yo|howdy)$',
+    re.IGNORECASE
+)
+
+COURTESY_REGEX = re.compile(
+    r'^(thanks|thank\s+you|thanku|thx|ok|okay|k|cool|got\s+it|great|awesome|bye|goodbye|see\s+you)$',
+    re.IGNORECASE
+)
+
+
+def is_greeting_or_courtesy(question: str) -> bool:
+    """Returns True if the query is a simple greeting, affirmation, or pleasantry."""
+    if not question:
+        return False
+    clean = re.sub(r'[^\w\s]', '', question.strip()).strip().lower()
+    return bool(GREETINGS_REGEX.match(clean) or COURTESY_REGEX.match(clean))
+
+
+def get_greeting_or_courtesy_response(question: str) -> Optional[str]:
+    """Returns an instant canned HTML response for greetings and courtesies (< 0.1 ms)."""
+    if not question:
+        return None
+    clean = re.sub(r'[^\w\s]', '', question.strip()).strip().lower()
+    if GREETINGS_REGEX.match(clean):
+        return "<p>Hello! I am your SurveyCXM AI Assistant. How can I assist you today?</p>"
+    if clean in ["thanks", "thank you", "thanku", "thx"]:
+        return "<p>You are welcome! Let me know if you need help with anything else in SurveyCXM.</p>"
+    if clean in ["ok", "okay", "k", "cool", "got it", "great", "awesome"]:
+        return "<p>Great! Feel free to ask if you have any questions about SurveyCXM.</p>"
+    if clean in ["bye", "goodbye", "see you"]:
+        return "<p>Goodbye! Have a great day ahead.</p>"
+    return None
 
 
 PERSONAL_OR_CONVERSATIONAL_REGEX = re.compile(
@@ -115,14 +148,18 @@ def needs_rewriting(question: str, chat_history: Optional[list]) -> bool:
     # Direct personal identity queries should stay intact so the LLM directly reads user introduction
     if is_conversational_query(clean_q):
         return False
-    words = clean_q.split()
 
-    # Short follow-ups (<= 3 words, e.g. "Why?", "How so?", "Where?") are almost always context-dependent
-    if len(words) <= 3:
+    # Greetings and courtesy messages should NEVER be rewritten into prior questions
+    if is_greeting_or_courtesy(clean_q):
+        return False
+
+    # Check for pronoun or anaphoric references (e.g. "it", "that", "how do I set it up?")
+    if CONVERSATIONAL_TRIGGERS.search(clean_q):
         return True
 
-    # Check for pronoun or anaphoric references
-    if CONVERSATIONAL_TRIGGERS.search(clean_q):
+    # Standalone short ambiguous follow-ups (e.g. "Why?", "How so?", "Where?")
+    clean_lower = clean_q.lower().strip("?.! ")
+    if clean_lower in ["why", "how so", "where", "how", "what else", "explain"]:
         return True
 
     return False
