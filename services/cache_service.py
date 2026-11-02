@@ -161,8 +161,13 @@ class SemanticCacheService:
         if not query or not answer:
             return False
 
-        # Guard: Do not cache out-of-scope errors or generic failures
-        if "An error occurred while processing" in answer or len(answer.strip()) < 10:
+        # Guard: Do not cache out-of-scope errors, personal info, or generic failures
+        if (
+            "An error occurred while processing" in answer
+            or "I cannot assist with topics outside of SurveyCXM" in answer
+            or "Your name is" in answer
+            or len(answer.strip()) < 10
+        ):
             return False
 
         norm_q = _normalize_text(query)

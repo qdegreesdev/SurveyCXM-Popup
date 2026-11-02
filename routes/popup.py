@@ -10,7 +10,7 @@ DATE LOGIC:
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Form, BackgroundTasks, Request, Depends, Header
-from fastapi.responses import PlainTextResponse, FileResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, FileResponse
 import os
 import uuid
 from loguru import logger
@@ -18,7 +18,7 @@ from loguru import logger
 from config import settings
 import database
 from database import get_db_service
-from services.ai_service import generate_ai_summary, answer_user_question, stream_user_question
+from services.ai_service import generate_ai_summary, answer_user_question
 # rag_service decoupled from popup route
 from services.mock_data import get_mock_popup_data
 from services.tts_service import generate_audio_file
@@ -26,7 +26,8 @@ import json
 import secrets
 from services.popup_service import parse_datetime, aggregate_issues, _DEFAULT_LAST_LOGIN_HOURS
 from services.cache_service import cache_service
-from services.query_rewriter import rewrite_query_async
+from services.session_service import session_service
+from services.query_rewriter import rewrite_query_async, clean_and_parse_chat_history
 from services.observability_service import observability_service, TraceRecord
 from services.ask_ai_agent import ask_ai_agent
 import time
@@ -76,9 +77,7 @@ async def ask_ai(
     user_last_login_date: str = Form(...),
     user_current_login_date: str = Form(...),
     question: str = Form(..., description="User question about CX metrics"),
-    secretKey: str = Form(..., description="API secret key or admin secret"),
-    chat_history: Optional[str] = Form(None, description="Optional JSON array of previous chat messages"),
-    stream: bool = Form(False, description="Enable SSE real-time token streaming")
+    secretKey: str = Form(..., description="API secret key or admin secret")
 ):
     rate_limiter.check_rate_limit(request, "ask_ai", settings.rate_limit_ask_ai)
     if not (verify_secret(secretKey, settings.api_secret_key) or verify_secret(secretKey, settings.admin_secret)):
@@ -102,54 +101,26 @@ async def ask_ai(
     if last_login_dt > current_login_dt:
         raise HTTPException(status_code=400, detail="Last login date cannot be in the future relative to the current login date.")
 
-    def _format_stream_response(message: str) -> StreamingResponse:
-        async def _gen():
-            yield f"data: {json.dumps({'token': message})}\n\n"
-            yield 'data: {"token": "", "done": true}\n\n'
-            yield "data: [DONE]\n\n"
-        return StreamingResponse(
-            _gen(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"
-            }
-        )
-
     if settings.use_mock_data:
-        if stream:
-            return _format_stream_response("Database is unavailable. Cannot answer questions without real time data.")
         return {"answer": "Database is unavailable. Cannot answer questions without real time data."}
 
     db = get_db_service()
     if not database.DB_AVAILABLE or db is None:
-        if stream:
-            return _format_stream_response("Database is unavailable. Cannot answer questions without real time data.")
         return {"answer": "Database is unavailable. Cannot answer questions without real time data."}
 
     client_info = db.get_client_by_id(client_id)
     if not client_info:
-        if stream:
-            return _format_stream_response("Invalid client ID or client is inactive.")
         return {"answer": "Invalid client ID or client is inactive."}
     survey_ids = db.get_survey_ids_by_client(client_id) or []
     if not survey_ids:
-        if stream:
-            return _format_stream_response("No active surveys found for this client.")
         return {"answer": "No active surveys found for this client."}
 
-    parsed_chat_history = []
-    if chat_history:
-        try:
-            parsed_chat_history = json.loads(chat_history)
-            if not isinstance(parsed_chat_history, list):
-                parsed_chat_history = []
-        except Exception as parse_err:
-            logger.warning(f"Failed to parse chat_history JSON: {parse_err}")
-            parsed_chat_history = []
+    session_key = session_service.resolve_session_key(request, client_id=client_id)
 
-    # 1. Contextual Query Rewriting for Multi-Turn Conversations
+    # 1. Automatic Server-Side Session Memory
+    parsed_chat_history = session_service.get_history(session_key)
+
+    # 2. Contextual Query Rewriting for Multi-Turn Conversations
     effective_question, was_rewritten = await rewrite_query_async(question, parsed_chat_history)
 
     # 2. Semantic Response Caching (scoped strictly to client ID and comparison period)
@@ -169,21 +140,11 @@ async def ask_ai(
             retrieval_ms=0.0,
             llm_time_ms=0.0,
             total_latency_ms=total_lat_ms,
-            stream_mode=stream,
+            stream_mode=False,
             tokens_prompt_est=0,
             tokens_completion_est=len(cached_result["answer"].split()) * 2,
             status="success"
         ))
-        if stream:
-            return StreamingResponse(
-                cache_service.stream_cached_response(cached_result["answer"]),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
-            )
         return {
             "answer": cached_result["answer"],
             "cached": True,
@@ -227,81 +188,7 @@ async def ask_ai(
         # critical_issues = await asyncio.to_thread(aggregate_issues, voice.get("high_severity_records", []))
         # =========================================================================
 
-        # ── NEW AUTONOMOUS FUNCTION-CALLING AGENT PATH (OPTION 1) ─────────────
-        # Real-time Streaming Path
-        if stream:
-            async def _stream_and_track():
-                tokens_accum = []
-                t_llm_start = time.time()
-                try:
-                    async for chunk in ask_ai_agent.run_stream(
-                        client_id=client_id,
-                        last_login_dt=last_login_dt,
-                        current_login_dt=current_login_dt,
-                        question=effective_question,
-                        chat_history=parsed_chat_history
-                    ):
-                        yield chunk
-                        if chunk.startswith("data: "):
-                            data_part = chunk[6:].strip()
-                            if data_part != "[DONE]":
-                                try:
-                                    p = json.loads(data_part)
-                                    if p.get("token"):
-                                        tokens_accum.append(p["token"])
-                                except Exception:
-                                    pass
-
-                    full_answer = "".join(tokens_accum).strip()
-                    llm_ms = (time.time() - t_llm_start) * 1000
-                    total_ms = (time.time() - start_req_time) * 1000
-
-                    if full_answer:
-                        cache_service.set(namespace=client_namespace, query=effective_question, answer=full_answer)
-
-                    observability_service.record_trace(TraceRecord(
-                        endpoint="ask-ai",
-                        client_id=client_id,
-                        raw_question=question,
-                        rewritten_question=effective_question,
-                        was_rewritten=was_rewritten,
-                        cache_hit=False,
-                        retrieval_ms=0.0,
-                        llm_time_ms=llm_ms,
-                        total_latency_ms=total_ms,
-                        stream_mode=True,
-                        tokens_prompt_est=len(effective_question.split()) * 2 + 1200,
-                        tokens_completion_est=len(full_answer.split()) * 2,
-                        status="success"
-                    ))
-                except Exception as stream_err:
-                    observability_service.record_trace(TraceRecord(
-                        endpoint="ask-ai",
-                        client_id=client_id,
-                        raw_question=question,
-                        rewritten_question=effective_question,
-                        was_rewritten=was_rewritten,
-                        cache_hit=False,
-                        retrieval_ms=0.0,
-                        llm_time_ms=0.0,
-                        total_latency_ms=(time.time() - start_req_time) * 1000,
-                        stream_mode=True,
-                        status="error",
-                        error_message=str(stream_err)
-                    ))
-                    raise
-
-            return StreamingResponse(
-                _stream_and_track(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
-            )
-
-        # Standard Non-Streaming Path
+        # ── AUTONOMOUS FUNCTION-CALLING AGENT PATH ─────────────
         t_llm_start = time.time()
         answer = await ask_ai_agent.run(
             client_id=client_id,
@@ -315,6 +202,9 @@ async def ask_ai(
 
         # Store in semantic cache
         cache_service.set(namespace=client_namespace, query=effective_question, answer=answer)
+
+        # Record turn in server-side session memory for this caller
+        session_service.add_turn(session_key, question, answer)
 
         # Record telemetry trace
         observability_service.record_trace(TraceRecord(
@@ -349,27 +239,7 @@ async def ask_ai(
         raise HTTPException(status_code=500, detail="Internal server error generating AI response.")
 
 
-@router.post("/ask-ai/stream", summary="Real-time SSE token streaming for Ask-AI")
-async def ask_ai_stream(
-    request: Request,
-    client_id: int = Form(...),
-    user_last_login_date: str = Form(...),
-    user_current_login_date: str = Form(...),
-    question: str = Form(..., description="User question about CX metrics"),
-    secretKey: str = Form(..., description="API secret key or admin secret"),
-    chat_history: Optional[str] = Form(None, description="Optional JSON array of previous chat messages")
-):
-    """Dedicated endpoint for real-time SSE token streaming of Ask-AI responses."""
-    return await ask_ai(
-        request=request,
-        client_id=client_id,
-        user_last_login_date=user_last_login_date,
-        user_current_login_date=user_current_login_date,
-        question=question,
-        secretKey=secretKey,
-        chat_history=chat_history,
-        stream=True
-    )
+
 
 
 @router.post("/login-popup-summary")

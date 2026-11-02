@@ -480,8 +480,11 @@ STRICT DOMAIN SCOPE & BEHAVIORAL GUIDELINES:
 
         if chat_history and isinstance(chat_history, list):
             for msg in chat_history[-6:]:
-                if isinstance(msg, dict) and "role" in msg and "content" in msg:
-                    messages.append({"role": msg["role"], "content": str(msg["content"])[:500]})
+                if isinstance(msg, dict):
+                    role = msg.get("role") or msg.get("sender") or msg.get("author") or "user"
+                    content = msg.get("content") or msg.get("message") or msg.get("text") or msg.get("user") or ""
+                    if role in ["user", "assistant"] and content and str(content).strip():
+                        messages.append({"role": role, "content": str(content)[:500].strip()})
 
         messages.append({"role": "user", "content": question})
 
@@ -576,8 +579,11 @@ STRICT DOMAIN SCOPE & BEHAVIORAL GUIDELINES:
 
         if chat_history and isinstance(chat_history, list):
             for msg in chat_history[-6:]:
-                if isinstance(msg, dict) and "role" in msg and "content" in msg:
-                    messages.append({"role": msg["role"], "content": str(msg["content"])[:500]})
+                if isinstance(msg, dict):
+                    role = msg.get("role") or msg.get("sender") or msg.get("author") or "user"
+                    content = msg.get("content") or msg.get("message") or msg.get("text") or msg.get("user") or ""
+                    if role in ["user", "assistant"] and content and str(content).strip():
+                        messages.append({"role": role, "content": str(content)[:500].strip()})
 
         messages.append({"role": "user", "content": question})
 
