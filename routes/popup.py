@@ -26,7 +26,7 @@ import json
 import secrets
 from services.popup_service import parse_datetime, aggregate_issues, _DEFAULT_LAST_LOGIN_HOURS
 from services.cache_service import cache_service
-from services.query_rewriter import rewrite_query_async
+from services.query_rewriter import rewrite_query_async, clean_and_parse_chat_history
 from services.observability_service import observability_service, TraceRecord
 from services.ask_ai_agent import ask_ai_agent
 import time
@@ -139,15 +139,7 @@ async def ask_ai(
             return _format_stream_response("No active surveys found for this client.")
         return {"answer": "No active surveys found for this client."}
 
-    parsed_chat_history = []
-    if chat_history:
-        try:
-            parsed_chat_history = json.loads(chat_history)
-            if not isinstance(parsed_chat_history, list):
-                parsed_chat_history = []
-        except Exception as parse_err:
-            logger.warning(f"Failed to parse chat_history JSON: {parse_err}")
-            parsed_chat_history = []
+    parsed_chat_history = clean_and_parse_chat_history(chat_history)
 
     # 1. Contextual Query Rewriting for Multi-Turn Conversations
     effective_question, was_rewritten = await rewrite_query_async(question, parsed_chat_history)

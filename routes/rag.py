@@ -25,7 +25,8 @@ from services.rate_limiter import rate_limiter
 from services.rag_service import rag_service
 from services.ai_service import answer_rag_question, stream_rag_question
 from services.cache_service import cache_service
-from services.query_rewriter import rewrite_query_async
+import re
+from services.query_rewriter import rewrite_query_async, clean_and_parse_chat_history, is_conversational_query
 from services.observability_service import observability_service, TraceRecord
 
 router = APIRouter()
@@ -73,21 +74,19 @@ async def doc_rag_search(
 
     logger.info(f"API Request: POST /api/doc-rag-search | question='{question[:60]}...'")
 
-    parsed_chat_history = []
-    if chat_history:
-        try:
-            parsed_chat_history = json.loads(chat_history)
-            if not isinstance(parsed_chat_history, list):
-                parsed_chat_history = []
-        except Exception as parse_err:
-            logger.warning(f"Failed to parse chat_history JSON: {parse_err}")
-            parsed_chat_history = []
+    parsed_chat_history = clean_and_parse_chat_history(chat_history)
 
     # 1. Contextual Query Rewriting for Multi-Turn Conversations
     effective_question, was_rewritten = await rewrite_query_async(question, parsed_chat_history)
 
     # 2. Semantic Response Cache Check (< 15 ms lookup)
-    cached_result = cache_service.get(namespace="doc_rag", query=effective_question)
+    # Only check public doc_rag cache if there is NO conversational context and query is not personal
+    has_history = bool(parsed_chat_history)
+    is_personal_query = is_conversational_query(effective_question) or is_conversational_query(question)
+
+    cached_result = None
+    if not has_history and not is_personal_query:
+        cached_result = cache_service.get(namespace="doc_rag", query=effective_question)
     if cached_result:
         total_lat_ms = (time.time() - start_req_time) * 1000
         observability_service.record_trace(TraceRecord(
@@ -155,7 +154,7 @@ async def doc_rag_search(
                     llm_ms = (time.time() - t_llm_start) * 1000
                     total_ms = (time.time() - start_req_time) * 1000
 
-                    if full_answer:
+                    if full_answer and not has_history and not is_personal_query:
                         cache_service.set(namespace="doc_rag", query=effective_question, answer=full_answer)
 
                     observability_service.record_trace(TraceRecord(
@@ -209,8 +208,9 @@ async def doc_rag_search(
         llm_ms = (time.time() - t_llm_start) * 1000
         total_ms = (time.time() - start_req_time) * 1000
 
-        # Cache valid response
-        cache_service.set(namespace="doc_rag", query=effective_question, answer=answer)
+        # Cache valid response only if not conversational / personal
+        if not has_history and not is_personal_query:
+            cache_service.set(namespace="doc_rag", query=effective_question, answer=answer)
 
         # Record telemetry trace
         observability_service.record_trace(TraceRecord(

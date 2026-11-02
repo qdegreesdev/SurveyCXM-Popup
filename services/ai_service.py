@@ -358,9 +358,11 @@ CHURN INTENT SIGNALS:
 
     if chat_history and isinstance(chat_history, list):
         for msg in chat_history[-6:]:
-            if isinstance(msg, dict) and "role" in msg and "content" in msg:
-                if msg["role"] in ["user", "assistant"]:
-                    messages.append({"role": msg["role"], "content": str(msg["content"])})
+            if isinstance(msg, dict):
+                role = msg.get("role") or msg.get("sender") or msg.get("author") or "user"
+                content = msg.get("content") or msg.get("message") or msg.get("text") or msg.get("user") or ""
+                if role in ["user", "assistant"] and content and str(content).strip():
+                    messages.append({"role": role, "content": str(content).strip()})
 
     messages.append({"role": "user", "content": question})
     return messages, None
@@ -496,7 +498,9 @@ BEHAVIOR & RESPONSE GUIDELINES:
    - You are EXCLUSIVELY a SurveyCXM Assistant.
    - If the query is completely unrelated to SurveyCXM or Customer Experience (such as general knowledge, cooking recipes, jokes, weather, sports, movies, outside programming languages, trivia, etc.):
    - You MUST respond strictly with: "<p>I cannot assist with topics outside of SurveyCXM.</p>".
-   - CONVERSATIONAL MEMORY EXCEPTION: If the user asks a conversational follow-up referencing information they explicitly introduced earlier in the chat history (such as their name, identity, or prior turn context), answer politely, accurately, and naturally in clean HTML using the conversation history.
+   - CONVERSATIONAL MEMORY & USER IDENTITY:
+     * When the chat history contains personal introductions (e.g. "my name is...", "i am...", "call me..."), and the user asks "what is my name", "who am i", or asks about prior turns in the conversation, you MUST answer accurately, politely, and directly in clean HTML using the chat history (e.g. "<p>Your name is [Name].</p>").
+     * NEVER use the out-of-scope rejection for user identity or conversation recall questions when the chat history contains the answer.
 
 3. SURVEYCXM QUERIES WITH NO RECORDED DOCUMENTATION:
    - If the user asks a valid question related to SurveyCXM (such as surveys, feedback, logic, triggers, modules, reports, settings, integrations) but the specific details or feature are NOT covered in the documentation above:
@@ -535,9 +539,11 @@ BEHAVIOR & RESPONSE GUIDELINES:
 
     if chat_history and isinstance(chat_history, list):
         for msg in chat_history[-6:]:
-            if isinstance(msg, dict) and "role" in msg and "content" in msg:
-                if msg["role"] in ["user", "assistant"]:
-                    messages.append({"role": msg["role"], "content": str(msg["content"])})
+            if isinstance(msg, dict):
+                role = msg.get("role") or msg.get("sender") or msg.get("author") or "user"
+                content = msg.get("content") or msg.get("message") or msg.get("text") or msg.get("user") or ""
+                if role in ["user", "assistant"] and content and str(content).strip():
+                    messages.append({"role": role, "content": str(content).strip()})
 
     messages.append({"role": "user", "content": question})
     return messages, None

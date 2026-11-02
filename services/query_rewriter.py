@@ -16,13 +16,90 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+import json
+import ast
+from typing import Any
+
 # Heuristic reference patterns that signal a contextual follow-up
 CONVERSATIONAL_TRIGGERS = re.compile(
     r'\b(it|this|that|them|these|those|they|its|previous|above|former|latter|'
     r'again|first one|second one|third one|why|how to enable|how to setup|'
-    r'how to configure|explain more|tell me more|more details)\b',
+    r'how to configure|explain more|tell me more|more details|my name|who am i|'
+    r'remember me|what is my)\b',
     re.IGNORECASE
 )
+
+
+PERSONAL_OR_CONVERSATIONAL_REGEX = re.compile(
+    r'\b(my name|who am i|my email|call me|what is my name|remember me|who i am)\b',
+    re.IGNORECASE
+)
+
+
+def is_conversational_query(question: str) -> bool:
+    """Returns True if the query asks about personal identity or conversational state."""
+    if not question:
+        return False
+    return bool(PERSONAL_OR_CONVERSATIONAL_REGEX.search(question))
+
+
+def clean_and_parse_chat_history(raw_history: Any) -> list[dict[str, str]]:
+    """
+    Universally and robustly parses chat history from any client input:
+    - Standard JSON string with double quotes: '[{"role": "user", "content": "..."}]'
+    - Single-quoted string (Python-style): "[{'role': 'user', 'content': '...'}]"
+    - Raw Python list of dicts: [{"role": "user", "content": "..."}]
+    - Single dictionary object: {"role": "user", "content": "..."}
+    - Plain string (e.g. "my name is jitesh"): converted to user turn
+    - Alternative keys ('message', 'text', 'prompt', 'query', 'user' -> 'content')
+    - Alternative role keys ('sender', 'author', 'type' -> 'role')
+    """
+    if not raw_history:
+        return []
+
+    parsed = None
+    if isinstance(raw_history, list):
+        parsed = raw_history
+    elif isinstance(raw_history, dict):
+        parsed = [raw_history]
+    elif isinstance(raw_history, str):
+        clean_str = raw_history.strip()
+        if not clean_str:
+            return []
+        try:
+            parsed = json.loads(clean_str)
+        except Exception:
+            try:
+                parsed = ast.literal_eval(clean_str)
+            except Exception:
+                parsed = [{"role": "user", "content": clean_str}]
+
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    if not isinstance(parsed, list):
+        parsed = [{"role": "user", "content": str(parsed)}]
+
+    normalized: list[dict[str, str]] = []
+    for item in parsed:
+        if isinstance(item, dict):
+            content = (
+                item.get("content")
+                or item.get("message")
+                or item.get("text")
+                or item.get("query")
+                or item.get("user")
+                or item.get("prompt")
+                or ""
+            )
+            role = item.get("role") or item.get("sender") or item.get("author") or "user"
+            if role not in ["user", "assistant"]:
+                role = "user"
+            if content and str(content).strip():
+                normalized.append({"role": role, "content": str(content).strip()})
+        elif isinstance(item, str) and item.strip():
+            normalized.append({"role": "user", "content": item.strip()})
+
+    return normalized
 
 
 def needs_rewriting(question: str, chat_history: Optional[list]) -> bool:
