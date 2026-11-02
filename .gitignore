@@ -28,3 +28,6 @@ static/audio/*.mp3
 data/
 .pytest_cache/
 .deepeval/
+
+# Markdown files
+*.md
