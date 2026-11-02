@@ -27,7 +27,7 @@ import secrets
 from services.popup_service import parse_datetime, aggregate_issues, _DEFAULT_LAST_LOGIN_HOURS
 from services.cache_service import cache_service
 from services.session_service import session_service
-from services.query_rewriter import rewrite_query_async, clean_and_parse_chat_history
+from services.query_rewriter import rewrite_query_async, clean_and_parse_chat_history, get_greeting_or_courtesy_response
 from services.observability_service import observability_service, TraceRecord
 from services.ask_ai_agent import ask_ai_agent
 import time
@@ -116,6 +116,15 @@ async def ask_ai(
         return {"answer": "No active surveys found for this client."}
 
     session_key = session_service.resolve_session_key(request, client_id=client_id)
+
+    # Fast-path for greetings & pleasantries (< 1 ms latency, bypasses LLM & metrics)
+    fast_greeting = get_greeting_or_courtesy_response(question)
+    if fast_greeting:
+        session_service.add_turn(session_key, question, fast_greeting)
+        return {
+            "answer": fast_greeting,
+            "cached": False
+        }
 
     # 1. Automatic Server-Side Session Memory
     parsed_chat_history = session_service.get_history(session_key)
