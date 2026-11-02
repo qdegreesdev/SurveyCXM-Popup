@@ -31,7 +31,7 @@ CONVERSATIONAL_TRIGGERS = re.compile(
 
 
 PERSONAL_OR_CONVERSATIONAL_REGEX = re.compile(
-    r'\b(my name|who am i|my email|call me|what is my name|remember me|who i am)\b',
+    r'\b(my name|who am i|my email|call me|what is my name|remember me|who i am|my role|what is my role)\b',
     re.IGNORECASE
 )
 
@@ -111,6 +111,10 @@ def needs_rewriting(question: str, chat_history: Optional[list]) -> bool:
         return False
 
     clean_q = question.strip()
+
+    # Direct personal identity queries should stay intact so the LLM directly reads user introduction
+    if is_conversational_query(clean_q):
+        return False
     words = clean_q.split()
 
     # Short follow-ups (<= 3 words, e.g. "Why?", "How so?", "Where?") are almost always context-dependent
