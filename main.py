@@ -82,6 +82,9 @@ app.include_router(review_suggestion_router, prefix="/api", tags=["Review Sugges
 from routes.category_generator import router as category_generator_router
 app.include_router(category_generator_router, prefix="/api", tags=["Category Generator"])
 
+from routes.observability import router as observability_router
+app.include_router(observability_router)
+
 
 @app.on_event("startup")
 async def startup():
@@ -92,14 +95,15 @@ async def startup():
     else:
         logger.warning("⚠️  Running without DB — mock data mode active")
 
-    # Pre-warm documentation RAG vector index in background
+    # Pre-warm documentation RAG vector index and start autonomous background auto-sync worker
     try:
         import asyncio
         from services.rag_service import rag_service
         asyncio.create_task(asyncio.to_thread(rag_service.sync_documentation_index))
-        logger.info("📚 Documentation RAG index pre-warming started")
+        rag_service.start_auto_sync_worker(interval_seconds=60)
+        logger.info("📚 Documentation RAG auto-sync worker initialized (60s background polling)")
     except Exception as e:
-        logger.warning(f"Could not pre-warm RAG service: {e}")
+        logger.warning(f"Could not initialize RAG auto-sync: {e}")
     
     # Display the API link in the console so it can be clicked
     logger.info("🌐 API is available at: http://127.0.0.1:8000/")

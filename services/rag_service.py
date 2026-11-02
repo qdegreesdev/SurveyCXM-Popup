@@ -10,9 +10,12 @@ import hashlib
 import html
 import json
 import logging
+import math
 import os
 import re
+from collections import Counter
 import threading
+import time
 from typing import Any
 
 import chromadb
@@ -25,6 +28,7 @@ logger = logging.getLogger(__name__)
 CHROMA_PERSIST_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chroma_db")
 META_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "doc_index_meta.json")
 COLLECTION_NAME = "surveycxm_documentation"
+FLASHRANK_CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "flashrank_cache")
 
 
 def _safe_cat_id(cat_id: Any) -> int:
@@ -205,6 +209,89 @@ def chunk_category_documentation(category: dict[str, Any]) -> list[dict[str, Any
     return chunks
 
 
+class BM25Index:
+    """
+    In-memory Okapi BM25 index for sparse keyword search.
+    Provides fast, zero-dependency lexical retrieval alongside ChromaDB dense vectors.
+    """
+    def __init__(self, k1: float = 1.5, b: float = 0.75):
+        self.k1 = k1
+        self.b = b
+        self.corpus_size = 0
+        self.avgdl = 0.0
+        self.doc_lengths = []
+        self.doc_ids = []
+        self.doc_freqs = []
+        self.idf = {}
+        self.metadatas = []
+        self.documents = []
+
+    @staticmethod
+    def tokenize(text: str) -> list[str]:
+        """Extract lowercase alphanumeric tokens, including template placeholders (e.g. {{VAR}})."""
+        if not text:
+            return []
+        return re.findall(r'\{\{[^}]+\}\}|\b\w+\b', text.lower())
+
+    def index(self, doc_ids: list[str], documents: list[str], metadatas: list[dict[str, Any]]):
+        """Constructs document frequencies and IDF lookup table from corpus."""
+        self.doc_ids = doc_ids
+        self.documents = documents
+        self.metadatas = metadatas
+        self.corpus_size = len(documents)
+        if self.corpus_size == 0:
+            return
+
+        self.doc_freqs = []
+        self.doc_lengths = []
+        df = Counter()
+        for doc in documents:
+            tokens = self.tokenize(doc)
+            self.doc_lengths.append(len(tokens))
+            freq = Counter(tokens)
+            self.doc_freqs.append(freq)
+            for token in freq.keys():
+                df[token] += 1
+
+        self.avgdl = sum(self.doc_lengths) / self.corpus_size
+        self.idf = {}
+        for token, count in df.items():
+            self.idf[token] = math.log(((self.corpus_size - count + 0.5) / (count + 0.5)) + 1.0)
+
+    def search(self, query: str, top_k: int = 10) -> list[dict[str, Any]]:
+        """Scores all indexed chunks against query terms and returns ranked candidates."""
+        if not query or self.corpus_size == 0:
+            return []
+        tokens = self.tokenize(query)
+        if not tokens:
+            return []
+        scores = []
+        for idx in range(self.corpus_size):
+            score = 0.0
+            doc_len = self.doc_lengths[idx]
+            freq = self.doc_freqs[idx]
+            len_norm = 1.0 - self.b + self.b * (doc_len / self.avgdl if self.avgdl > 0 else 1.0)
+            for token in tokens:
+                if token not in freq:
+                    continue
+                tf = freq[token]
+                idf = self.idf.get(token, 0.0)
+                score += idf * (tf * (self.k1 + 1.0) / (tf + self.k1 * len_norm))
+            if score > 0.0:
+                scores.append((idx, score))
+        scores.sort(key=lambda x: x[1], reverse=True)
+        results = []
+        for rank, (idx, bm25_score) in enumerate(scores[:top_k], 1):
+            results.append({
+                "id": self.doc_ids[idx],
+                "score": bm25_score,
+                "text": self.documents[idx],
+                "metadata": self.metadatas[idx],
+                "rank": rank
+            })
+        return results
+
+
 class DocRAGService:
     """Manages document chunking, embeddings, ChromaDB vector store, and semantic retrieval."""
 
@@ -212,9 +299,29 @@ class DocRAGService:
         self.chroma_client = None
         self.collection = None
         self.embedding_fn = None
+        self.bm25 = BM25Index()
+        self.ranker = None
         self._initialized = False
         self._lock = threading.RLock()
         self._is_syncing = False
+        self._last_auto_check_time = 0.0
+        self._auto_check_interval = 30.0
+        self._worker_thread = None
+        self._worker_started = False
+
+    def _ensure_ranker(self):
+        """Initializes local FlashRank cross-encoder for high-precision reranking."""
+        if self.ranker is not None:
+            return self.ranker
+        try:
+            from flashrank import Ranker
+            os.makedirs(FLASHRANK_CACHE_DIR, exist_ok=True)
+            self.ranker = Ranker(model_name="ms-marco-TinyBERT-L-2-v2", cache_dir=FLASHRANK_CACHE_DIR)
+            logger.info("⚡ FlashRank local cross-encoder initialized successfully.")
+        except Exception as e:
+            logger.warning(f"Could not initialize FlashRank cross-encoder: {e}")
+            self.ranker = None
+        return self.ranker
 
     def _ensure_chroma(self) -> bool:
         """Initializes ChromaDB persistent client and collection with local embeddings."""
@@ -229,6 +336,15 @@ class DocRAGService:
                 embedding_function=self.embedding_fn,
                 metadata={"hnsw:space": "cosine"}
             )
+            # Ensure in-memory BM25 index is populated from persistent collection
+            if self.bm25.corpus_size == 0 and self.collection.count() > 0:
+                try:
+                    all_data = self.collection.get(include=["documents", "metadatas"])
+                    if all_data and all_data.get("ids"):
+                        self.bm25.index(all_data["ids"], all_data["documents"], all_data["metadatas"])
+                        logger.info(f"⚡ BM25 sparse index loaded with {self.bm25.corpus_size} chunks.")
+                except Exception as bm_err:
+                    logger.warning(f"Could not load BM25 index: {bm_err}")
             return True
         except Exception as e:
             logger.error(f"❌ Failed to initialize ChromaDB: {e}")
@@ -321,6 +437,10 @@ class DocRAGService:
                         metadatas=chunk_metas[i:i + batch_size]
                     )
 
+                # Index in-memory BM25 index for sparse hybrid retrieval
+                self.bm25.index(chunk_ids, chunk_texts, chunk_metas)
+                logger.info(f"⚡ BM25 sparse index built with {len(all_chunks)} chunks.")
+
                 # Save metadata file
                 try:
                     os.makedirs(os.path.dirname(META_FILE_PATH), exist_ok=True)
@@ -334,6 +454,15 @@ class DocRAGService:
                     logger.warning(f"Failed to write doc_index_meta.json: {e}")
 
                 logger.info(f"✅ Successfully indexed {len(all_chunks)} documentation chunks into ChromaDB.")
+
+                # Automatically invalidate cached documentation answers upon reindexing
+                try:
+                    from services.cache_service import cache_service
+                    cache_service.invalidate_namespace("doc_rag")
+                    logger.info("⚡ Invalidation completed: doc_rag semantic cache cleared for fresh documentation.")
+                except Exception as cache_err:
+                    logger.warning(f"Failed to invalidate cache after documentation reindex: {cache_err}")
+
                 return {
                     "success": True,
                     "status": "reindexed",
@@ -343,16 +472,54 @@ class DocRAGService:
             finally:
                 self._is_syncing = False
 
+    def start_auto_sync_worker(self, interval_seconds: int = 60):
+        """Starts a background daemon thread that periodically checks MySQL for documentation updates."""
+        with self._lock:
+            if self._worker_started:
+                return
+            self._worker_started = True
+
+        def _worker_loop():
+            logger.info(f"🔄 Documentation RAG auto-sync worker started (interval: {interval_seconds}s)")
+            import time
+            while True:
+                try:
+                    time.sleep(interval_seconds)
+                    self.sync_documentation_index(force=False)
+                except Exception as worker_err:
+                    logger.warning(f"Error in documentation auto-sync worker loop: {worker_err}")
+
+        self._worker_thread = threading.Thread(target=_worker_loop, daemon=True, name="rag_doc_auto_sync")
+        self._worker_thread.start()
+
+    def check_and_sync_if_needed(self):
+        """Lightweight non-blocking check called on query arrival. If > 30s since last check, verify hash."""
+        now = time.time()
+        if (now - self._last_auto_check_time) < self._auto_check_interval or self._is_syncing:
+            return
+        self._last_auto_check_time = now
+        try:
+            if not self.collection or self.collection.count() == 0:
+                self.sync_documentation_index(force=False)
+                return
+            # Non-blocking background sync check when index is already populated
+            threading.Thread(target=self.sync_documentation_index, kwargs={"force": False}, daemon=True, name="rag_doc_ttl_sync").start()
+        except Exception as e:
+            logger.debug(f"Doc RAG check_and_sync_if_needed notice: {e}")
+
     def search_documentation(self, query: str, top_k: int = 3, min_similarity: float = 0.42) -> list[dict[str, Any]]:
         """
-        Performs semantic search against indexed documentation chunks.
-        Returns top matching chunks with similarity score.
-        Thread-safe, clamps top_k to collection count, and prevents concurrent sync races.
+        Performs Hybrid Search combining Dense Vector Retrieval (ONNX all-MiniLM-L6-v2)
+        and Sparse Lexical Retrieval (Okapi BM25) fused via Reciprocal Rank Fusion (RRF).
+        Yields superior precision for both conceptual semantic queries and exact keywords.
         """
         if not query or not query.strip():
             return []
 
         with self._lock:
+            # Check if database documentation was updated (TTL 30s)
+            self.check_and_sync_if_needed()
+
             if not self._ensure_chroma():
                 return []
 
@@ -374,43 +541,141 @@ class DocRAGService:
             if count == 0:
                 return []
 
-            # Safeguard top_k against collection size
-            actual_k = min(top_k, count)
-            if actual_k <= 0:
+            candidate_k = min(max(top_k * 4, 10), count)
+            if candidate_k <= 0:
                 return []
 
             try:
+                # 1. Dense Semantic Vector Search (ChromaDB)
                 results = self.collection.query(
                     query_texts=[query.strip()],
-                    n_results=actual_k,
+                    n_results=candidate_k,
                     include=["documents", "metadatas", "distances"]
                 )
 
-                if not results or not results.get("documents") or not results["documents"][0]:
-                    return []
+                dense_docs = results["documents"][0] if results and results.get("documents") else []
+                dense_ids = results["ids"][0] if results and results.get("ids") else []
+                dense_metas = results["metadatas"][0] if results and results.get("metadatas") else []
+                dense_dists = results["distances"][0] if results and results.get("distances") else []
 
-                docs = results["documents"][0]
-                metas = results["metadatas"][0]
-                distances = results["distances"][0]
+                dense_ranks = {}
+                dense_sims = {}
+                doc_lookup = {}
 
-                matched = []
-                for doc_text, meta, dist in zip(docs, metas, distances):
-                    # In cosine space, similarity = 1.0 - distance
-                    similarity = round(max(0.0, 1.0 - float(dist)), 4)
-                    if similarity >= min_similarity:
-                        matched.append({
-                            "module": meta.get("module_name", "General"),
-                            "section": meta.get("section_title", ""),
-                            "description": meta.get("description", ""),
-                            "text": doc_text,
-                            "similarity": similarity,
-                            "category_id": meta.get("category_id")
+                for rank, (did, doc, meta, dist) in enumerate(zip(dense_ids, dense_docs, dense_metas, dense_dists), 1):
+                    sim = round(max(0.0, 1.0 - float(dist)), 4)
+                    dense_ranks[did] = rank
+                    dense_sims[did] = sim
+                    doc_lookup[did] = (doc, meta)
+
+                # 2. Sparse Lexical Search (Okapi BM25)
+                sparse_res = self.bm25.search(query.strip(), top_k=candidate_k)
+                sparse_ranks = {}
+                sparse_scores = {}
+
+                for item in sparse_res:
+                    did = item["id"]
+                    sparse_ranks[did] = item["rank"]
+                    sparse_scores[did] = item["score"]
+                    if did not in doc_lookup:
+                        doc_lookup[did] = (item["text"], item["metadata"])
+
+                # 3. Reciprocal Rank Fusion (RRF) with k=60
+                RRF_K = 60
+                all_candidate_ids = set(dense_ranks.keys()) | set(sparse_ranks.keys())
+                scored_candidates = []
+
+                for did in all_candidate_ids:
+                    r_dense = dense_ranks.get(did)
+                    r_sparse = sparse_ranks.get(did)
+
+                    score_dense = (1.0 / (RRF_K + r_dense)) if r_dense is not None else 0.0
+                    score_sparse = (1.0 / (RRF_K + r_sparse)) if r_sparse is not None else 0.0
+                    total_rrf = score_dense + score_sparse
+
+                    sim = dense_sims.get(did, 0.0)
+                    bm25_score = sparse_scores.get(did, 0.0)
+
+                    # Domain Guardrail / Quality Threshold:
+                    # Keep if dense similarity meets min_similarity, OR
+                    # if strong keyword match with reasonable semantic context, OR
+                    # if both dense and sparse matched
+                    is_relevant = False
+                    if sim >= min_similarity:
+                        is_relevant = True
+                    elif bm25_score >= 3.0:
+                        is_relevant = True
+                    elif r_dense is not None and r_sparse is not None and (sim >= 0.20 or bm25_score >= 1.5):
+                        is_relevant = True
+
+                    if is_relevant:
+                        scored_candidates.append({
+                            "id": did,
+                            "rrf": total_rrf,
+                            "similarity": sim,
+                            "bm25_score": bm25_score
                         })
+
+                # Sort candidates by descending RRF score
+                scored_candidates.sort(key=lambda x: x["rrf"], reverse=True)
+
+                # 4. Local Cross-Encoder Reranking (FlashRank)
+                ranker = self._ensure_ranker()
+                if ranker and len(scored_candidates) > 1:
+                    try:
+                        passages = []
+                        for cand in scored_candidates[:12]:
+                            did = cand["id"]
+                            doc_text, meta = doc_lookup[did]
+                            passages.append({
+                                "id": did,
+                                "text": doc_text,
+                                "cand": cand
+                            })
+                        from flashrank import RerankRequest
+                        rerank_req = RerankRequest(query=query.strip(), passages=passages)
+                        rerank_results = ranker.rerank(rerank_req)
+
+                        matched = []
+                        for r in rerank_results[:top_k]:
+                            did = r["id"]
+                            doc_text, meta = doc_lookup[did]
+                            cand = r["cand"]
+                            matched.append({
+                                "module": meta.get("module_name", "General"),
+                                "section": meta.get("section_title", ""),
+                                "description": meta.get("description", ""),
+                                "text": doc_text,
+                                "similarity": cand["similarity"],
+                                "category_id": meta.get("category_id"),
+                                "rrf_score": round(cand["rrf"], 5),
+                                "bm25_score": round(cand["bm25_score"], 2),
+                                "rerank_score": round(float(r["score"]), 5)
+                            })
+                        return matched
+                    except Exception as rerank_err:
+                        logger.warning(f"FlashRank reranking error, falling back to RRF: {rerank_err}")
+
+                # Fallback to RRF ranked selection
+                matched = []
+                for cand in scored_candidates[:top_k]:
+                    did = cand["id"]
+                    doc_text, meta = doc_lookup[did]
+                    matched.append({
+                        "module": meta.get("module_name", "General"),
+                        "section": meta.get("section_title", ""),
+                        "description": meta.get("description", ""),
+                        "text": doc_text,
+                        "similarity": cand["similarity"],
+                        "category_id": meta.get("category_id"),
+                        "rrf_score": round(cand["rrf"], 5),
+                        "bm25_score": round(cand["bm25_score"], 2)
+                    })
 
                 return matched
 
             except Exception as e:
-                logger.error(f"❌ Error during documentation vector search: {e}")
+                logger.error(f"❌ Error during hybrid documentation search: {e}")
                 return []
 
     def test_health(self) -> dict[str, Any]:

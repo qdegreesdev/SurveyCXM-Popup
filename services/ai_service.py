@@ -4,7 +4,8 @@ Uses last_login → now comparison (no week logic).
 """
 import json
 from datetime import datetime
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
+from typing import AsyncGenerator
 from loguru import logger
 from config import settings
 
@@ -30,7 +31,7 @@ def generate_ai_summary(nps_data: dict, demographics: list, critical_issues: lis
     if not settings.openai_api_key or settings.openai_api_key.startswith("sk-your"):
         logger.warning("No valid OpenAI API key — using rule-based summary.")
         return _fallback_summary(nps_data, demographics, critical_issues, survey_comparison, last_login_label, current_login_dt, html_format)
-
+        
     try:
         client = OpenAI(api_key=settings.openai_api_key)
 
@@ -219,64 +220,85 @@ def _fallback_summary(nps_data: dict, demographics: list, critical_issues: list,
     return {"summary": summary, "key_points": key_points[:5], "critical_vocs": critical_vocs}
 
 
-def answer_user_question(
+def _build_user_question_messages(
     nps_data: dict,
     demographics: list,
     critical_issues: list,
     question: str,
     survey_comparison: list = None,
-    chat_history: list = None
-) -> str:
-    """Answers a specific user question using real-time database CX metrics."""
+    chat_history: list = None,
+    doc_context: list = None
+) -> tuple[list[dict] | None, str | None]:
+    """Prepares messages payload for OpenAI, or returns a fast-path static response if applicable."""
     if not settings.openai_api_key or settings.openai_api_key.startswith("sk-your"):
         logger.warning("No valid OpenAI API key — using fallback answer.")
-        return "I am currently offline."
+        return None, "I am currently offline."
 
-    try:
-        client = OpenAI(api_key=settings.openai_api_key)
+    # Fast-path greeting response
+    import re
+    clean_q = question.strip().lower()
+    normalized_q = re.sub(r'[^\w\s]', '', clean_q).strip()
+    if normalized_q in [
+        "hyy", "hello", "hi", "hey", "good morning", "good afternoon",
+        "good evening", "greetings", "who are you", "what can you do", "help"
+    ]:
+        return None, "<p>Hello! I am your SurveyCXM AI Assistant. How can I assist you today?</p>"
 
-        delta      = nps_data.get("delta", 0) or 0
-        trend_word = "improved" if delta >= 0 else "declined"
+    delta      = nps_data.get("delta", 0) or 0
+    trend_word = "improved" if delta >= 0 else "declined"
 
-        # Full demographic detail with previous NPS for drill-down
-        demo_str = chr(10).join([
-            f"- {d['name']} ({d['type']}): NPS {d['current_nps']} (was {d.get('previous_nps','?')}, Delta: {d['delta']:+} pts, Responses: {d['responses']}, Trend: {d.get('trend','?')})"
-            for d in demographics
+    # Format documentation context if retrieved
+    docs_str = ""
+    if doc_context:
+        try:
+            from services.rag_service import rag_service
+            docs_str = rag_service.format_docs_for_prompt(doc_context)
+        except Exception as e:
+            logger.warning(f"Could not format documentation context: {e}")
+
+    # Full demographic detail with previous NPS for drill-down
+    demo_str = chr(10).join([
+        f"- {d['name']} ({d['type']}): NPS {d['current_nps']} (was {d.get('previous_nps','?')}, Delta: {d['delta']:+} pts, Responses: {d['responses']}, Trend: {d.get('trend','?')})"
+        for d in demographics
+    ])
+
+    # Individual survey breakdown (e.g. Customer Experience, Delivery Experience)
+    surveys_str = ""
+    if survey_comparison:
+        surveys_str = chr(10).join([
+            f"- Survey '{s['name']}' (ID {s['survey_id']}): {s['responses']} responses, {s.get('triggers', 0)} triggers/sent, Current NPS: {s['current_nps']} (was {s.get('previous_nps','?')}, Change: {s['delta']:+} pts)"
+            for s in survey_comparison
         ])
 
-        # Individual survey breakdown (e.g. Customer Experience, Delivery Experience)
-        surveys_str = ""
-        if survey_comparison:
-            surveys_str = chr(10).join([
-                f"- Survey '{s['name']}' (ID {s['survey_id']}): {s['responses']} responses, {s.get('triggers', 0)} triggers/sent, Current NPS: {s['current_nps']} (was {s.get('previous_nps','?')}, Change: {s['delta']:+} pts)"
-                for s in survey_comparison
-            ])
+    # Issues with verbatim samples and churn counts, including location data
+    def format_sample(s):
+        locs = [f"{k}:{v}" for k, v in s.get("loc_data", {}).items() if v and v != "Unknown"]
+        loc_str = f" (Loc: {', '.join(locs)})" if locs else ""
+        return f"{s.get('verbatim', '')}{loc_str}"
 
-        # Issues with verbatim samples and churn counts, including location data
-        def format_sample(s):
-            locs = [f"{k}:{v}" for k, v in s.get("loc_data", {}).items() if v and v != "Unknown"]
-            loc_str = f" (Loc: {', '.join(locs)})" if locs else ""
-            return f"{s.get('verbatim', '')}{loc_str}"
+    issues_str = chr(10).join([
+        f"- {i['issue']} | Count: {i['count']} | Severity: {i['severity']} | Churn/Critical Signals: {i.get('critical_count', 0)} | Samples: \"{' | '.join(format_sample(s) for s in i.get('samples', [])[:3])}\""
+        for i in critical_issues
+    ])
 
-        issues_str = chr(10).join([
-            f"- {i['issue']} | Count: {i['count']} | Severity: {i['severity']} | Churn/Critical Signals: {i.get('critical_count', 0)} | Samples: \"{' | '.join(format_sample(s) for s in i.get('samples', [])[:3])}\""
-            for i in critical_issues
-        ])
+    # Pre-sort for quick AI reference
+    top_gainers   = sorted([d for d in demographics if d.get("delta", 0) > 0], key=lambda x: -x["delta"])[:3]
+    top_decliners = sorted([d for d in demographics if d.get("delta", 0) < 0], key=lambda x:  x["delta"])[:3]
+    churn_signals = [i for i in critical_issues if i.get("critical_count", 0) > 0]
 
-        # Pre-sort for quick AI reference
-        top_gainers   = sorted([d for d in demographics if d.get("delta", 0) > 0], key=lambda x: -x["delta"])[:3]
-        top_decliners = sorted([d for d in demographics if d.get("delta", 0) < 0], key=lambda x:  x["delta"])[:3]
-        churn_signals = [i for i in critical_issues if i.get("critical_count", 0) > 0]
-
-        role_header = """You are SurveyCXM AI — an intelligent, highly accurate CX Analyst and Performance Intelligence Assistant.
+    role_header = """You are SurveyCXM AI — an intelligent, dual-engine CX Analyst and Platform Specialist Assistant.
 You have access to:
-USER'S REAL-TIME CX DATABASE METRICS: Live NPS scores, response counts, demographic breakdowns, customer feedback verbatims, survey breakdown, and time period context."""
+1. USER'S REAL-TIME CX DATABASE METRICS: Live NPS scores, response counts, demographic breakdowns, customer feedback verbatims, survey breakdown, and time period context.
+2. OFFICIAL SURVEYCXM DOCUMENTATION & PLATFORM GUIDES: Verified guides on survey creation methods, conditional branching logic, multilingual setup, user roles & permissions, automated event triggers, distributions, and workflows."""
 
-        app_section = """2. APPLICATION & HOW-TO QUESTIONS (FEATURE GUIDES & WORKFLOWS):
-   - If the user asks how a platform feature or module works (e.g., survey creation methods, branching logic, multilingual setup, user roles, automated event triggers):
-   - Respond cleanly in HTML: "<p>For platform feature guides, please use the Documentation Search assistant (/api/doc-rag-search).</p>"."""
+    app_section = """2. APPLICATION & HOW-TO QUESTIONS (FEATURE GUIDES & WORKFLOWS):
+   - When the user asks how a platform feature or module works (e.g., survey creation methods, question types, branching logic, multilingual setup, user roles & permissions, automated event triggers, distributions, tickets, action planning, reporting):
+   - SURGICAL RELEVANCE & SCOPE ISOLATION (UNIVERSAL): Answer ONLY the specific task, feature, or workflow asked by the user. Do NOT append unrelated platform stages or downstream workflows (e.g., if asked about survey creation, do NOT append automated triggers or action planning; if asked about triggers, do NOT append survey builder steps; if a reference has a multi-phase checklist, extract only the asked phase).
+   - If documentation is provided in the references below, provide direct, actionable, step-by-step instructions formatted in clean HTML (<p>, <ol>, <ul>, <li>, <strong>, <code>). Highlight module names and tab titles in <strong>.
+   - If NO documentation context was found for the requested platform feature:
+     * Respond cleanly: "<p>No documentation found for this feature. Please contact your administrator.</p>"."""
 
-        context = f"""
+    context = f"""
 {role_header}
 
 BEHAVIOR & RESPONSE GUIDELINES:
@@ -291,7 +313,8 @@ BEHAVIOR & RESPONSE GUIDELINES:
    - VALID CX QUESTIONS WITH NO RECORDED DATA: If the user asks a valid SurveyCXM data query about a specific survey, store, or region for which NO records exist in the current period, respond directly: "<p>No response data was recorded for <strong>[requested item/location/survey]</strong>.</p>".
 
 4. HYBRID QUESTIONS (METRICS + WORKFLOWS):
-   - If the user asks a question combining both analytical performance and platform configuration: summarize the live CX metrics, and if documentation is provided, include the configuration steps.
+   - If the user asks a question combining both analytical performance and platform configuration (e.g. "Our NPS dropped in Mumbai, how do I configure SMS triggers?"):
+   - Provide a unified, comprehensive answer: first summarize and analyze the live CX metrics, and then provide the step-by-step platform configuration guidance from the documentation.
 
 5. STRICT DOMAIN SCOPE & OUT-OF-SCOPE REJECTION:
    - You are EXCLUSIVELY a SurveyCXM Assistant.
@@ -302,6 +325,8 @@ BEHAVIOR & RESPONSE GUIDELINES:
 6. CLEAN HTML OUTPUT ONLY:
    - Format your entire response using clean, interactive-ready HTML tags (<p>, <strong>, <ul>, <ol>, <li>, <table>, <code>).
    - Do NOT use Markdown formatting (no asterisks **, no markdown headers #, no markdown dashes -). Keep the output professional and easy to read in chat bubbles.
+
+{docs_str if docs_str else ""}
 
 TIME WINDOW / DATE PERIOD: {nps_data.get('current_period_label', 'Since last login')}
 
@@ -329,41 +354,115 @@ CHURN INTENT SIGNALS:
 {chr(10).join([f"- {i['issue']}: {i['critical_count']} churn signals" for i in churn_signals]) or "No explicit churn signals in current period."}
 """
 
-        messages = [{"role": "system", "content": context}]
+    messages = [{"role": "system", "content": context}]
 
-        if chat_history and isinstance(chat_history, list):
-            for msg in chat_history[-6:]:
-                if isinstance(msg, dict) and "role" in msg and "content" in msg:
-                    if msg["role"] in ["user", "assistant"]:
-                        messages.append({"role": msg["role"], "content": str(msg["content"])})
+    if chat_history and isinstance(chat_history, list):
+        for msg in chat_history[-6:]:
+            if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                if msg["role"] in ["user", "assistant"]:
+                    messages.append({"role": msg["role"], "content": str(msg["content"])})
 
-        messages.append({"role": "user", "content": question})
+    messages.append({"role": "user", "content": question})
+    return messages, None
 
+
+def answer_user_question(
+    nps_data: dict,
+    demographics: list,
+    critical_issues: list,
+    question: str,
+    survey_comparison: list = None,
+    chat_history: list = None,
+    doc_context: list = None
+) -> str:
+    """Answers a specific user question using real-time database CX metrics and/or platform documentation (Dual-Engine)."""
+    messages, fast_answer = _build_user_question_messages(
+        nps_data=nps_data,
+        demographics=demographics,
+        critical_issues=critical_issues,
+        question=question,
+        survey_comparison=survey_comparison,
+        chat_history=chat_history,
+        doc_context=doc_context
+    )
+    if fast_answer is not None:
+        return fast_answer
+
+    try:
+        client = OpenAI(api_key=settings.openai_api_key)
         response = client.chat.completions.create(
             model=settings.openai_model,
             messages=messages,
             temperature=0.3,
             max_tokens=2000,
         )
-
         return response.choices[0].message.content.strip()
-
     except Exception as e:
         logger.error(f"Ask AI error: {e}")
         return "An error occurred while processing your question. Please try again later."
 
 
-def answer_rag_question(
+async def stream_user_question(
+    nps_data: dict,
+    demographics: list,
+    critical_issues: list,
+    question: str,
+    survey_comparison: list = None,
+    chat_history: list = None,
+    doc_context: list = None
+) -> AsyncGenerator[str, None]:
+    """Streams real-time SSE token chunks for the user question (Server-Sent Events)."""
+    messages, fast_answer = _build_user_question_messages(
+        nps_data=nps_data,
+        demographics=demographics,
+        critical_issues=critical_issues,
+        question=question,
+        survey_comparison=survey_comparison,
+        chat_history=chat_history,
+        doc_context=doc_context
+    )
+
+    if fast_answer is not None:
+        yield f"data: {json.dumps({'token': fast_answer})}\n\n"
+        yield 'data: {"token": "", "done": true}\n\n'
+        yield "data: [DONE]\n\n"
+        return
+
+    try:
+        async_client = AsyncOpenAI(api_key=settings.openai_api_key)
+        stream = await async_client.chat.completions.create(
+            model=settings.openai_model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=2000,
+            stream=True
+        )
+
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta:
+                token = chunk.choices[0].delta.content or ""
+                if token:
+                    yield f"data: {json.dumps({'token': token})}\n\n"
+
+        yield 'data: {"token": "", "done": true}\n\n'
+        yield "data: [DONE]\n\n"
+    except Exception as e:
+        logger.error(f"Ask AI streaming error: {e}")
+        err_msg = "<p>An error occurred while processing your question. Please try again later.</p>"
+        yield f"data: {json.dumps({'error': err_msg})}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+def _build_rag_question_messages(
     question: str,
     doc_context: list = None,
     chat_history: list = None
-) -> str:
-    """Answers user question using retrieved documentation context (dedicated RAG pipeline)."""
+) -> tuple[list[dict] | None, str | None]:
+    """Prepares documentation RAG messages payload or fast-path greeting."""
     if not settings.openai_api_key or settings.openai_api_key.startswith("sk-your"):
         logger.warning("No valid OpenAI API key — using fallback answer.")
-        return "<p>AI service is currently offline. Please verify API configuration.</p>"
+        return None, "<p>AI service is currently offline. Please verify API configuration.</p>"
 
-    # 1. Immediate polite greeting response for standalone conversational greetings
     import re
     clean_q = question.strip().lower()
     normalized_q = re.sub(r'[^\w\s]', '', clean_q).strip()
@@ -371,15 +470,18 @@ def answer_rag_question(
         "hyy", "hello", "hi", "hey", "good morning", "good afternoon",
         "good evening", "greetings", "who are you", "what can you do", "help"
     ]:
-        return "<p>Hello! I am your SurveyCXM AI Assistant. How can I assist you today?</p>"
+        return None, "<p>Hello! I am your SurveyCXM AI Assistant. How can I assist you today?</p>"
 
     doc_context = doc_context or []
 
     try:
         from services.rag_service import rag_service
         docs_str = rag_service.format_docs_for_prompt(doc_context)
+    except Exception as e:
+        logger.warning(f"Could not format documentation context: {e}")
+        docs_str = ""
 
-        context = f"""
+    context = f"""
 You are SurveyCXM AI — an intelligent, highly accurate SurveyCXM Application Specialist and Documentation Assistant.
 Your primary role is to provide clear, actionable, step-by-step guidance on SurveyCXM features, modules, configurations, survey creation methods, branching logic, multilingual setup, user roles & permissions, automated event triggers, distributions, and workflows.
 
@@ -394,13 +496,26 @@ BEHAVIOR & RESPONSE GUIDELINES:
    - You are EXCLUSIVELY a SurveyCXM Assistant.
    - If the query is completely unrelated to SurveyCXM or Customer Experience (such as general knowledge, cooking recipes, jokes, weather, sports, movies, outside programming languages, trivia, etc.):
    - You MUST respond strictly with: "<p>I cannot assist with topics outside of SurveyCXM.</p>".
+   - CONVERSATIONAL MEMORY EXCEPTION: If the user asks a conversational follow-up referencing information they explicitly introduced earlier in the chat history (such as their name, identity, or prior turn context), answer politely, accurately, and naturally in clean HTML using the conversation history.
 
 3. SURVEYCXM QUERIES WITH NO RECORDED DOCUMENTATION:
    - If the user asks a valid question related to SurveyCXM (such as surveys, feedback, logic, triggers, modules, reports, settings, integrations) but the specific details or feature are NOT covered in the documentation above:
    - Do NOT invent procedures, fake URLs, or hallucinate settings.
    - Respond clearly in HTML: "<p>No documentation found for this feature. Please contact your administrator.</p>".
 
-4. APPLICATION & HOW-TO QUESTIONS (FEATURE GUIDES & WORKFLOWS):
+4. SURGICAL RELEVANCE & SCOPE ISOLATION (UNIVERSAL FOR ALL QUESTIONS):
+   - Answer ONLY the specific task, feature, or workflow asked by the user. Do not attach unrelated, preceding, or downstream modules.
+   - CHECKLIST & ROADMAP FILTERING: If a retrieved documentation reference contains a multi-phase checklist, campaign roadmap, or general orientation guide (e.g., Step 1: Settings, Step 2: Survey, Step 3: Triggers, Step 4: Tickets), extract ONLY the specific phase or items that answer the user's inquiry. Discard the rest.
+   - MODULE INTEGRITY ACROSS PLATFORM:
+     * When asked about building/creating a survey (NPS, CSAT, CES, or custom): Focus strictly on the Survey Management / Build Survey module (navigation, creation methods: scratch/templates/AI, and the 5 builder tabs: Questions, Appearance, Settings, Languages, Logic). Do NOT include Automated Triggers or Action Planning ticketing rules.
+     * When asked about question types or metric scales: List and describe the specific question types requested (e.g., NPS 0–10, CSAT 1–5, CES, MCQ, Checkbox, Text, Rating, Matrix, Upload) without mixing in distribution or ticketing workflows.
+     * When asked about logic or branching: Focus strictly on the Logic Tab capabilities (skip logic, page jumping, conditional question display).
+     * When asked about automated triggers: Focus strictly on the Triggers & Automation module (trigger types: event-based, scheduled, Excel file upload, API/webhook; channels: Email, SMS, WhatsApp). Do NOT include survey builder steps or ticket rules.
+     * When asked about tickets or action planning: Focus strictly on the Action Planning module (closed-loop rules, SLA thresholds, ticket assignments, detractor alerts). Do NOT include survey creation or distribution triggers.
+     * When asked about users, roles, or permissions: Focus strictly on the Access Management module (Admin vs Team Member, sidebar module permissions, and granular action permissions: create, edit, view, delete, export).
+     * When asked about analytics or reports: Focus strictly on the Analytics & Reports module (NPS/CSAT dashboards, sentiment metrics, demographic drilldown, exports).
+
+5. APPLICATION & HOW-TO QUESTIONS (FEATURE GUIDES & WORKFLOWS):
    - When the documentation is available in the references above:
    - Provide direct, clear, structured, and actionable step-by-step instructions.
    - Use clean HTML formatting:
@@ -411,32 +526,89 @@ BEHAVIOR & RESPONSE GUIDELINES:
      * Use <code> for variables, placeholders, or API fields (e.g., <code>{{FIRST_NAME}}</code>).
    - NEVER say you don't know or don't have access if the information is present in the documentation above.
 
-5. CLEAN HTML OUTPUT ONLY:
+6. CLEAN HTML OUTPUT ONLY:
    - Format your entire response using clean, interactive-ready HTML tags (<p>, <strong>, <ul>, <ol>, <li>, <table>, <code>).
    - Do NOT use Markdown formatting (no asterisks **, no markdown headers #, no markdown dashes -). Keep the output professional and easy to read in chat bubbles.
 """
 
+    messages = [{"role": "system", "content": context}]
+
+    if chat_history and isinstance(chat_history, list):
+        for msg in chat_history[-6:]:
+            if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                if msg["role"] in ["user", "assistant"]:
+                    messages.append({"role": msg["role"], "content": str(msg["content"])})
+
+    messages.append({"role": "user", "content": question})
+    return messages, None
+
+
+def answer_rag_question(
+    question: str,
+    doc_context: list = None,
+    chat_history: list = None
+) -> str:
+    """Answers user question using retrieved documentation context (dedicated RAG pipeline)."""
+    messages, fast_answer = _build_rag_question_messages(
+        question=question,
+        doc_context=doc_context,
+        chat_history=chat_history
+    )
+    if fast_answer is not None:
+        return fast_answer
+
+    try:
         client = OpenAI(api_key=settings.openai_api_key)
-        messages = [{"role": "system", "content": context}]
-
-        if chat_history and isinstance(chat_history, list):
-            for msg in chat_history[-6:]:
-                if isinstance(msg, dict) and "role" in msg and "content" in msg:
-                    if msg["role"] in ["user", "assistant"]:
-                        messages.append({"role": msg["role"], "content": str(msg["content"])})
-
-        messages.append({"role": "user", "content": question})
-
         response = client.chat.completions.create(
             model=settings.openai_model,
             messages=messages,
             temperature=0.3,
             max_tokens=2000,
         )
-
         return response.choices[0].message.content.strip()
-
     except Exception as e:
         logger.error(f"Doc RAG question error: {e}")
         return "<p>An error occurred while processing your question. Please try again later.</p>"
 
+
+async def stream_rag_question(
+    question: str,
+    doc_context: list = None,
+    chat_history: list = None
+) -> AsyncGenerator[str, None]:
+    """Streams real-time SSE token chunks for documentation RAG question (Server-Sent Events)."""
+    messages, fast_answer = _build_rag_question_messages(
+        question=question,
+        doc_context=doc_context,
+        chat_history=chat_history
+    )
+
+    if fast_answer is not None:
+        yield f"data: {json.dumps({'token': fast_answer})}\n\n"
+        yield 'data: {"token": "", "done": true}\n\n'
+        yield "data: [DONE]\n\n"
+        return
+
+    try:
+        async_client = AsyncOpenAI(api_key=settings.openai_api_key)
+        stream = await async_client.chat.completions.create(
+            model=settings.openai_model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=2000,
+            stream=True
+        )
+
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta:
+                token = chunk.choices[0].delta.content or ""
+                if token:
+                    yield f"data: {json.dumps({'token': token})}\n\n"
+
+        yield 'data: {"token": "", "done": true}\n\n'
+        yield "data: [DONE]\n\n"
+    except Exception as e:
+        logger.error(f"Doc RAG streaming error: {e}")
+        err_msg = "<p>An error occurred while processing your question. Please try again later.</p>"
+        yield f"data: {json.dumps({'error': err_msg})}\n\n"
+        yield "data: [DONE]\n\n"
