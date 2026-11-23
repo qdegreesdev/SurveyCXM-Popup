@@ -61,6 +61,11 @@ def get_agent_tools(last_login_dt: Optional[datetime] = None, current_login_dt: 
             f"`WHERE created_at >= '{last_login_dt.strftime('%Y-%m-%d %H:%M:%S')}' AND created_at <= '{current_login_dt.strftime('%Y-%m-%d %H:%M:%S')}'` "
             f"unless the user specifically asks for all-time/lifetime data."
         )
+    limit_guidance = (
+        " ROW LIMIT & RELEVANCE RULES: LIMIT 10 is the MAXIMUM default ceiling when no count is specified. It is NOT a minimum requirement. "
+        "Strictly filter for relevance (e.g., for churn signals or complaints, only select detractor rows with score <= 6 or genuine negative feedback; never include positive or appreciative comments). "
+        "If only 2 rows match, return 2. If none match, state none were found. If user explicitly requests more (e.g. 'show 20'), you may use up to LIMIT 50. Absolute maximum is 50 rows."
+    )
 
     return [
         {
@@ -115,7 +120,7 @@ def get_agent_tools(last_login_dt: Optional[datetime] = None, current_login_dt: 
                             "description": (
                                 "The read-only SQL SELECT query to execute. Question column slugs are UUIDs and MUST be "
                                 "enclosed in backticks (e.g. `2c34473a-ce0c-4cda-acd6-80ef67fd4f45`). Only tables for "
-                                f"this client's active surveys (e.g. `survey_responses_{{survey_id}}`) are accessible.{date_guidance}"
+                                f"this client's active surveys (e.g. `survey_responses_{{survey_id}}`) are accessible.{date_guidance}{limit_guidance}"
                             )
                         },
                         "explanation": {
@@ -132,6 +137,29 @@ def get_agent_tools(last_login_dt: Optional[datetime] = None, current_login_dt: 
 # Default tools reference for backward compatibility
 AGENT_TOOLS = get_agent_tools()
 
+
+def check_user_requested_over_50(question: str) -> bool:
+    clean = question.strip()
+    # Check for "all comments / all records / all responses / all feedback"
+    if re.search(r'\ball\b.*?\b(comments?|records?|responses?|feedback|rows?|samples?)\b', clean, re.IGNORECASE):
+        return True
+
+    # Pattern 1: "100 comments", "100 records", "100 customer feedback"
+    m1 = re.findall(r'\b(\d+)\s+(?:customer\s+|user\s+)?(comments?|records?|responses?|feedbacks?|rows?|samples?|items?)\b', clean, re.IGNORECASE)
+    for num_str, _ in m1:
+        if int(num_str) > 50:
+            return True
+
+    # Pattern 2: "show 100", "give me 100", "top 100", "first 100", "latest 100"
+    m2 = re.findall(r'\b(?:show|give|fetch|display|top|first|latest|get)\s+(?:me\s+)?(\d+)\b', clean, re.IGNORECASE)
+    for num_str in m2:
+        val = int(num_str)
+        if 1900 <= val <= 2100:  # ignore calendar years
+            continue
+        if val > 50:
+            return True
+
+    return False
 
 class AskAIAgent:
     """
@@ -160,19 +188,33 @@ class AskAIAgent:
             return {"surveys": [], "allowed_tables": []}
 
         surveys = db._execute_query(
-            "SELECT id, name FROM surveys WHERE client_id = %s ORDER BY id ASC LIMIT 25",
+            "SELECT id, name FROM surveys WHERE client_id = %s ORDER BY id ASC",
             (client_id,)
         )
         if not surveys:
             return {"surveys": [], "allowed_tables": []}
 
-        survey_ids = [s["id"] for s in surveys]
-        allowed_tables = [f"survey_responses_{sid}" for sid in survey_ids] + ["surveys", "questions", "metadata_fields"]
+        # Filter only surveys whose table survey_responses_{id} exists
+        existing_surveys = [
+            s for s in surveys
+            if db._check_table_exists(f"survey_responses_{s['id']}")
+        ]
+        surveys = existing_surveys[:25]
+        if not surveys:
+            return {"surveys": [], "allowed_tables": []}
 
-        # Fetch questions for these surveys
+        survey_ids = [s["id"] for s in surveys]
+        allowed_tables = (
+            [f"survey_responses_{sid}" for sid in survey_ids] +
+            [f"survey_responses_nr_{sid}" for sid in survey_ids] +
+            [f"filter_hierarchy_{sid}" for sid in survey_ids] +
+            ["surveys", "questions", "metadata_fields", "voc_alerts"]
+        )
+
+        # Fetch questions for these surveys (support complete survey forms up to 1000 questions)
         placeholders = ", ".join(["%s"] * len(survey_ids))
         questions = db._execute_query(
-            f"SELECT id, survey_id, question, slug, type FROM questions WHERE survey_id IN ({placeholders}) ORDER BY survey_id, sort_order ASC LIMIT 200",
+            f"SELECT id, survey_id, question, slug, type FROM questions WHERE survey_id IN ({placeholders}) ORDER BY survey_id, sort_order ASC LIMIT 1000",
             tuple(survey_ids)
         )
 
@@ -210,7 +252,7 @@ class AskAIAgent:
                 "name": s["name"],
                 "table_name": f"survey_responses_{sid}",
                 "filters": meta_by_survey.get(sid, {}),
-                "questions": questions_by_survey.get(sid, [])[:15]
+                "questions": questions_by_survey.get(sid, [])[:50]
             })
 
         result = {
@@ -265,14 +307,20 @@ class AskAIAgent:
                     "error": f"Security Violation: Access denied to table '{tbl_clean}'."
                 }
 
-        # 5. Enforce LIMIT 50 to prevent memory exhaustion
+        # 5. Enforce Default LIMIT 10 and Hard Ceiling LIMIT 50
+        is_capped = False
         limit_match = re.search(r'\bLIMIT\s+(\d+)', clean_sql, re.IGNORECASE)
         if limit_match:
             val = int(limit_match.group(1))
             if val > 50:
+                is_capped = True
                 clean_sql = re.sub(r'\bLIMIT\s+\d+', 'LIMIT 50', clean_sql, flags=re.IGNORECASE)
         else:
-            clean_sql += " LIMIT 50"
+            # For aggregations (GROUP BY), allow returning groups up to 50
+            if re.search(r'\bGROUP\s+BY\b', clean_sql, re.IGNORECASE):
+                clean_sql += " LIMIT 50"
+            else:
+                clean_sql += " LIMIT 10"
 
         # 6. Execute via existing MySQL connection pool
         db = get_db_service()
@@ -285,6 +333,8 @@ class AskAIAgent:
             return {
                 "success": True,
                 "row_count": len(rows),
+                "is_capped": is_capped,
+                "note": "(Capped at max limit of 50 records:)" if is_capped else None,
                 "rows": rows[:50]
             }
         except Exception as e:
@@ -436,13 +486,33 @@ STRICT DOMAIN SCOPE & BEHAVIORAL GUIDELINES:
 
 3. GENERAL OUT-OF-SCOPE QUESTIONS:
    - If the user asks general-purpose questions unrelated to SurveyCXM (such as writing outside programming code, cooking recipes, weather, sports, or general trivia), respond strictly with:
-     "<p>I am your SurveyCXM AI Assistant dedicated to your account CX metrics and survey responses. I cannot assist with topics outside of SurveyCXM.</p>"
+     "<p>I cannot assist with topics outside of SurveyCXM.</p>"
 
 4. DYNAMIC SQL RULES:
    - Always enclose question UUID column slugs in backticks (e.g. `SELECT `2c34473a-ce0c-4cda-acd6-80ef67fd4f45` FROM survey_responses_8`).
    - Only query tables belonging to this client (e.g. `survey_responses_{{id}}`).
    - By default, apply the date window filter: `WHERE created_at >= '{start_str}' AND created_at <= '{end_str}'`.
    - Never run mutation statements (no UPDATE/DELETE/DROP). Only SELECT statements.
+   - CONTENT RELEVANCE & ROW LIMIT POLICY (MANDATORY):
+     * STRICT CONTENT & SEMANTIC ACCURACY:
+       - When a user asks for specific types of feedback (e.g. "signs of churn", "complaints", "detractor feedback", "negative comments"):
+         1. Verify that EVERY single comment you display genuinely matches that criterion.
+         2. NEVER classify positive, neutral, or appreciative comments (such as "product performed well", "checkout was smooth", "clear and helpful", "appreciated during the experience") as churn signals or complaints!
+         3. When executing SQL queries, filter for detractor/negative ratings (e.g., ratings <= 6 on a 0-10 NPS scale, or <= 2 on a 1-5 CSAT scale) and genuine dissatisfaction.
+     * LIMIT IS A MAXIMUM CAP, NOT A MANDATORY QUOTA:
+       - It is NEVER mandatory to return 10 comments if 10 relevant comments do not exist!
+       - If only 2 or 3 genuine matching comments exist, display ONLY those 2 or 3.
+       - If NO comments match the user's specific request during this period, state honestly:
+         "<p>No customer comments indicating signs of churn were found during the selected period.</p>"
+       - NEVER pad the response with irrelevant, positive, or generic comments just to fill a count of 10.
+     * DEFAULT CAP (NO COUNT REQUESTED):
+       - When the user asks for comments without specifying a quantity (e.g. "show customer comments"), retrieve at most 10 (LIMIT 10). Show only the matching ones (up to 10).
+     * USER REQUESTS SPECIFIC COUNT <= 50 (e.g. "show 15", "give me 25"):
+       - Fetch up to that requested number (`LIMIT N`) and display only those that genuinely match.
+     * USER REQUESTS > 50 OR "ALL" (e.g. "show 100", "show all"):
+       - Never dump more than 50 records. Show:
+         "<p><em>(Capped at max limit of 50 records. Please request up to 50.)</em></p>"
+     * Aggregations (COUNT(*), AVG(), SUM(), GROUP BY) are not subject to the 10-row default and return standard grouped numbers.
 
 5. RESPONSE FORMATTING:
    - Format final responses in clean HTML (<p>, <strong>, <ul>, <ol>, <li>, <table>, <code>).
@@ -470,6 +540,10 @@ STRICT DOMAIN SCOPE & BEHAVIORAL GUIDELINES:
         # 2. Fast-path redirection for platform documentation queries
         if DOC_REDIRECT_TRIGGERS.search(question):
             return DOC_REDIRECT_MESSAGE
+
+        # 3. Fast-path for queries requesting more than 50 records (show only the capped message)
+        if check_user_requested_over_50(question):
+            return "<p><em>(Capped at max limit of 50 records. Please request up to 50.)</em></p>"
 
         schema_context = self.get_client_schema_context(client_id)
         survey_ids = schema_context.get("survey_ids", [])
@@ -530,7 +604,7 @@ STRICT DOMAIN SCOPE & BEHAVIORAL GUIDELINES:
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": json.dumps(output)
+                    "content": json.dumps(output, default=str)
                 })
 
         # Final synthesis turn
@@ -539,7 +613,9 @@ STRICT DOMAIN SCOPE & BEHAVIORAL GUIDELINES:
             messages=messages,
             temperature=0.35
         )
-        return final_res.choices[0].message.content or "<p>No response generated.</p>"
+        final_text = final_res.choices[0].message.content or "<p>No response generated.</p>"
+        
+        return final_text
 
     # ── Real-Time Streaming Agent Execution ───────────────────────────────────
 
@@ -566,6 +642,14 @@ STRICT DOMAIN SCOPE & BEHAVIORAL GUIDELINES:
         # 2. Fast-path redirection for platform documentation queries
         if DOC_REDIRECT_TRIGGERS.search(question):
             yield f"data: {json.dumps({'token': DOC_REDIRECT_MESSAGE})}\n\n"
+            yield 'data: {"token": "", "done": true}\n\n'
+            yield "data: [DONE]\n\n"
+            return
+
+        # 3. Fast-path for queries requesting more than 50 records (show only the capped message)
+        if check_user_requested_over_50(question):
+            msg = "<p><em>(Capped at max limit of 50 records. Please request up to 50.)</em></p>"
+            yield f"data: {json.dumps({'token': msg})}\n\n"
             yield 'data: {"token": "", "done": true}\n\n'
             yield "data: [DONE]\n\n"
             return
@@ -667,7 +751,7 @@ STRICT DOMAIN SCOPE & BEHAVIORAL GUIDELINES:
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
-                "content": json.dumps(output)
+                "content": json.dumps(output, default=str)
             })
 
         # Step 3: Stream the final synthesized answer token-by-token
