@@ -97,7 +97,10 @@ class DatabaseService:
 
         try:
             with self._cursor() as cursor:
-                cursor.execute(query, normalized_params)
+                if normalized_params:
+                    cursor.execute(query, normalized_params)
+                else:
+                    cursor.execute(query)
                 return cursor.fetchall()
         except RuntimeError:
             return []

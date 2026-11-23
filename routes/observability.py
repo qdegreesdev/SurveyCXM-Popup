@@ -66,11 +66,12 @@ async def get_observability_stats(
 async def get_observability_traces(
     request: Request,
     limit: int = Query(50, ge=1, le=500),
-    endpoint: Optional[str] = Query(None),
+    endpoint: Optional[str] = Query(None, description="Filter by endpoint: 'ask-ai' or 'doc-rag-search'"),
+    client_id: Optional[int] = Query(None, description="Filter traces by tenant client ID"),
     secretKey: Optional[str] = Query(None, description="API secret key or admin secret")
 ):
     _verify_auth(request, secretKey)
-    traces = observability_service.get_traces(limit=limit, endpoint=endpoint)
+    traces = observability_service.get_traces(limit=limit, endpoint=endpoint, client_id=client_id)
     return {
         "status": "success",
         "count": len(traces),

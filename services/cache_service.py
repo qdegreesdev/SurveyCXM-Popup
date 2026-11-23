@@ -46,16 +46,30 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
 
 
 class CacheEntry:
-    """Represents a cached query and response."""
-    def __init__(self, query: str, normalized_query: str, embedding: Optional[list[float]], answer: str, namespace: str):
+    """Represents a cached query and response with optional TTL expiration."""
+    def __init__(
+        self,
+        query: str,
+        normalized_query: str,
+        embedding: Optional[list[float]],
+        answer: str,
+        namespace: str,
+        ttl: Optional[float] = None
+    ):
         self.query = query
         self.normalized_query = normalized_query
         self.embedding = embedding
         self.answer = answer
         self.namespace = namespace
+        self.ttl = ttl  # None for permanent (e.g. doc_rag), seconds for dynamic metrics (e.g. ask_ai)
         self.created_at = time.time()
         self.last_accessed = self.created_at
         self.hit_count = 0
+
+    def is_expired(self) -> bool:
+        if self.ttl is None or self.ttl <= 0:
+            return False
+        return (time.time() - self.created_at) > self.ttl
 
     def record_hit(self):
         self.hit_count += 1
@@ -104,17 +118,23 @@ class SemanticCacheService:
             ns_exact = self._exact_index.get(namespace, {})
             if norm_q in ns_exact:
                 entry = ns_exact[norm_q]
-                entry.record_hit()
-                self._total_hits += 1
-                self._tokens_saved_estimate += 500
-                logger.info(f"⚡ [CACHE HIT - EXACT] namespace={namespace} hits={entry.hit_count} query='{query[:40]}...'")
-                return {
-                    "answer": entry.answer,
-                    "similarity": 1.0,
-                    "hit_type": "exact",
-                    "matched_query": entry.query,
-                    "hit_count": entry.hit_count
-                }
+                if entry.is_expired():
+                    del ns_exact[norm_q]
+                    if namespace in self._entries and entry in self._entries[namespace]:
+                        self._entries[namespace].remove(entry)
+                    logger.info(f"⏳ [CACHE EXPIRED - EXACT] namespace={namespace} query='{query[:40]}...'")
+                else:
+                    entry.record_hit()
+                    self._total_hits += 1
+                    self._tokens_saved_estimate += 500
+                    logger.info(f"⚡ [CACHE HIT - EXACT] namespace={namespace} hits={entry.hit_count} query='{query[:40]}...'")
+                    return {
+                        "answer": entry.answer,
+                        "similarity": 1.0,
+                        "hit_type": "exact",
+                        "matched_query": entry.query,
+                        "hit_count": entry.hit_count
+                    }
 
             entries = self._entries.get(namespace, [])
             if not entries:
@@ -135,29 +155,40 @@ class SemanticCacheService:
             entries = self._entries.get(namespace, [])
             for entry in entries:
                 if entry.embedding:
+                    # Guard against semantic collision when queries specify different numbers/quantities
+                    q_numbers = set(re.findall(r'\b\d+\b', query))
+                    entry_numbers = set(re.findall(r'\b\d+\b', entry.query))
+                    if q_numbers != entry_numbers:
+                        continue
                     sim = _cosine_similarity(query_vec, entry.embedding)
                     if sim > best_sim:
                         best_sim = sim
                         best_entry = entry
 
             if best_entry and best_sim >= threshold:
-                best_entry.record_hit()
-                self._total_hits += 1
-                self._tokens_saved_estimate += 500
-                logger.info(f"⚡ [CACHE HIT - SEMANTIC] namespace={namespace} sim={best_sim:.4f} matched='{best_entry.query[:40]}' query='{query[:40]}...'")
-                return {
-                    "answer": best_entry.answer,
-                    "similarity": round(float(best_sim), 4),
-                    "hit_type": "semantic",
-                    "matched_query": best_entry.query,
-                    "hit_count": best_entry.hit_count
-                }
+                if best_entry.is_expired():
+                    if namespace in self._entries and best_entry in self._entries[namespace]:
+                        self._entries[namespace].remove(best_entry)
+                    self._exact_index.get(namespace, {}).pop(best_entry.normalized_query, None)
+                    logger.info(f"⏳ [CACHE EXPIRED - SEMANTIC] namespace={namespace} query='{query[:40]}...'")
+                else:
+                    best_entry.record_hit()
+                    self._total_hits += 1
+                    self._tokens_saved_estimate += 500
+                    logger.info(f"⚡ [CACHE HIT - SEMANTIC] namespace={namespace} sim={best_sim:.4f} matched='{best_entry.query[:40]}' query='{query[:40]}...'")
+                    return {
+                        "answer": best_entry.answer,
+                        "similarity": round(float(best_sim), 4),
+                        "hit_type": "semantic",
+                        "matched_query": best_entry.query,
+                        "hit_count": best_entry.hit_count
+                    }
 
             self._total_misses += 1
             return None
 
-    def set(self, namespace: str, query: str, answer: str) -> bool:
-        """Stores a question and answer in the cache with its ONNX embedding."""
+    def set(self, namespace: str, query: str, answer: str, ttl: Optional[float] = None) -> bool:
+        """Stores a question and answer in the cache with its ONNX embedding and TTL expiration."""
         if not query or not answer:
             return False
 
@@ -173,12 +204,18 @@ class SemanticCacheService:
         norm_q = _normalize_text(query)
         query_vec = self._get_embedding(query)
 
+        # Default ask_ai queries to a 5-minute (300s) TTL so live CX metrics stay fresh
+        effective_ttl = ttl
+        if effective_ttl is None and namespace.startswith("ask_ai:"):
+            effective_ttl = 300.0
+
         entry = CacheEntry(
             query=query.strip(),
             normalized_query=norm_q,
             embedding=query_vec,
             answer=answer.strip(),
-            namespace=namespace
+            namespace=namespace,
+            ttl=effective_ttl
         )
 
         with self._lock:

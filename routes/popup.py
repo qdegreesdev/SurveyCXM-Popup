@@ -336,7 +336,7 @@ async def login_popup_summary(
         # 2. Fetch surveys
         survey_ids = db.get_survey_ids_by_client(client_id)
         if not survey_ids:
-            summary_text = f"Welcome back! Currently, there are no active surveys associated with your account."
+            summary_text = f"Welcome back! Currently, No new survey responses have been received between your previous login and your current login."
             summary_audio_filename = f"tts_{uuid.uuid4().hex}.mp3"
             background_tasks.add_task(generate_audio_file, text=summary_text, filename=summary_audio_filename)
             return {

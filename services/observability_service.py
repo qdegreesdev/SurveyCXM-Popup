@@ -161,12 +161,14 @@ class ObservabilityService:
                 "endpoint_distribution": endpoints
             }
 
-    def get_traces(self, limit: int = 50, endpoint: Optional[str] = None) -> list[dict[str, Any]]:
-        """Returns the most recent execution traces."""
+    def get_traces(self, limit: int = 50, endpoint: Optional[str] = None, client_id: Optional[int] = None) -> list[dict[str, Any]]:
+        """Returns the most recent execution traces, optionally filtered by endpoint or client_id."""
         with self._lock:
             filtered = list(self._traces)
             if endpoint:
                 filtered = [t for t in filtered if t.endpoint == endpoint]
+            if client_id is not None:
+                filtered = [t for t in filtered if t.client_id == client_id]
             # Return most recent first
             return [t.to_dict() for t in reversed(filtered[-limit:])]
 
